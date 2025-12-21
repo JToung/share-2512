@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "strict": true,
+    "jsx": "preserve",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "lib": ["ESNext", "DOM"],
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@packages/*": ["packages/*/src"],
+      "@risk-app/*": ["apps/risk-app/src/*"],
+      "@audit-app/*": ["apps/audit-app/src/*"],
+      "@comms-bridge/*": ["apps/comms-bridge/src/*"]
+    }
+  },
+  "include": ["apps", "packages"]
+}
