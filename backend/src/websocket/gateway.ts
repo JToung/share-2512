@@ -8,7 +8,7 @@ interface BroadcastPayload {
   body: unknown;
 }
 
-@WebSocketController('/ws')
+@WebSocketController('/ws/signal-hub')
 export class WsGateway {
   @Inject()
   messageService: MessageService;

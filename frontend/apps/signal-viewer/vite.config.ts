@@ -21,7 +21,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(workspaceRoot, 'dist/audit-app'),
+    outDir: path.resolve(workspaceRoot, 'dist/signal-viewer'),
     emptyOutDir: true,
     rollupOptions: {
       input: path.resolve(appRoot, 'index.html'),

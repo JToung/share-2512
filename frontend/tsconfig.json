@@ -14,8 +14,8 @@
     "baseUrl": ".",
     "paths": {
       "@packages/*": ["packages/*/src"],
-      "@risk-app/*": ["apps/risk-app/src/*"],
-      "@audit-app/*": ["apps/audit-app/src/*"],
+      "@signal-hub/*": ["apps/signal-hub/src/*"],
+      "@signal-viewer/*": ["apps/signal-viewer/src/*"],
       "@comms-bridge/*": ["apps/comms-bridge/src/*"]
     }
   },

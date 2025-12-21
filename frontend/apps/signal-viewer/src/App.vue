@@ -1,7 +1,7 @@
 <template>
   <div class="page">
-    <h1>审计端（audit.xxx.com）订阅中心</h1>
-    <p>通过公共 comms.xxx.com 中继页接入风控实时消息，同时监听 BroadcastChannel 以防止 iframe 挂掉。</p>
+    <h1>Signal Viewer（signal-viewer.xxx.com）订阅中心</h1>
+    <p>通过公共 comms.xxx.com 中继页接入 Signal Hub 实时消息，同时监听 BroadcastChannel 以防止 iframe 挂掉。</p>
 
     <section>
       <h2>IframeBridge 消息</h2>
@@ -28,20 +28,20 @@ import { IframeBridge } from '../../packages/bridge-sdk/src';
 
 const bridge = new IframeBridge({
   bridgeUrl: 'https://comms.xxx.com/index.html',
-  channelName: 'risk-audit-sync',
-  allowedOrigins: ['https://risk.xxx.com', 'https://audit.xxx.com', 'https://comms.xxx.com'],
+  channelName: 'signal-sync-bridge',
+  allowedOrigins: ['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com', 'https://comms.xxx.com'],
   targetOrigin: 'https://comms.xxx.com',
   hmacSecret: 'demo-shared-secret',
 });
 const bridgeMessages = ref<string[]>([]);
 let disposeBridge: (() => void) | undefined;
 
-const { history: channelHistory } = useBroadcastChannel<Record<string, unknown>>('risk-alerts', 'audit-app');
+const { history: channelHistory } = useBroadcastChannel<Record<string, unknown>>('signal-sync-alerts', 'signal-viewer');
 
 const sseMirror = ref<string[]>([]);
 let eventSource: EventSource | null = null;
 
-const requestSync = () => bridge.send('audit-sync-request', { ts: Date.now() });
+const requestSync = () => bridge.send('signal-viewer-sync-request', { ts: Date.now() });
 
 onMounted(async () => {
   await bridge.init();
@@ -49,7 +49,7 @@ onMounted(async () => {
     bridgeMessages.value = [`${msg.type}: ${JSON.stringify(msg.payload)}`, ...bridgeMessages.value].slice(0, 10);
   });
 
-  eventSource = new EventSource('http://localhost:7001/api/sse/stream?consumer=audit');
+  eventSource = new EventSource('http://localhost:7001/api/sse/stream?consumer=signal-viewer');
   eventSource.onmessage = (event) => {
     sseMirror.value = [`SSE ${event.data}`, ...sseMirror.value].slice(0, 6);
   };

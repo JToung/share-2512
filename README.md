@@ -7,8 +7,8 @@
 ```
 frontend/
   apps/
-    risk-app/          # 风控侧主应用（Pinia 状态 + 全量示例）
-    audit-app/         # 审计端消费示例
+    signal-hub/            # Signal Hub（通讯中枢）主应用（Pinia 状态 + 全量示例）
+    signal-viewer/            # Signal Viewer（观测面板）消费示例
     comms-bridge/      # comms.xxx.com 公共中继页
   packages/
     bridge-sdk/        # IframeBridge（origin 校验 + HMAC + sandbox）
@@ -26,7 +26,7 @@ backend/
 
 ```
 ┌──────────────┐        HTTP Poll        ┌──────────────┐
-│  risk.xxx.com│ ───────/api/messages──▶ │ Midway + Mongo│
+│ signal-hub.xxx.com ───────/api/messages──▶ │ Midway + Mongo│
 │  (Vue + Pinia│                        │  (SSE + WS)  │
 │  localStorage│◀────SSE stream────────▶│              │
 │  Broadcast   │                        │              │
@@ -35,7 +35,7 @@ backend/
        │ postMessage + BC                      │
        ▼                                       │
 ┌──────────────┐  BroadcastChannel  ┌──────────┴────────┐
-│comms.xxx.com │◀──────────────────▶│ audit.xxx.com     │
+│comms.xxx.com │◀──────────────────▶│ signal-viewer.xxx.com    │
 │ sandbox iframe│  replay cache      │ (Vue EventSource)│
 │ HMAC verify  │────────────────────▶│ useBroadcastChannel│
 └──────────────┘                     └──────────────────┘
@@ -55,8 +55,8 @@ backend/
 - `frontend/packages/local-comm/src/index.ts`：`useLocalStorageSync`、`useBroadcastChannel`、`httpPoll`。
 - `frontend/packages/bridge-sdk/src/index.ts`：IframeBridge 封装，包含 **origin 白名单**、**targetOrigin**、**HMAC + timestamp**、**nonce 防重放**、**懒加载 + beforeunload 清理**。
 - `frontend/apps/comms-bridge/src/main.ts`：公共中继页实现，集中校验消息签名并向 `BroadcastChannel` 转发。
-- `frontend/apps/risk-app/src/App.vue`：演示 Vue 端如何串联 localStorage、BroadcastChannel、IframeBridge、SSE、WebSocket、HTTP Polling。
-- `frontend/apps/audit-app/src/App.vue`：审计端订阅 iframe & SSE，验证跨域传输。
+- `frontend/apps/signal-hub/src/App.vue`：演示 Vue 端如何串联 localStorage、BroadcastChannel、IframeBridge、SSE、WebSocket、HTTP Polling。
+- `frontend/apps/signal-viewer/src/App.vue`：Signal Viewer 订阅 iframe & SSE，验证跨域传输。
 - `backend/src/controller/sse.controller.ts`：SSE Server + 消息广播 + HTTP 轮询接口。
 - `backend/src/websocket/gateway.ts`：`@midwayjs/ws` WebSocket 网关，双向处理消息并写入 MongoDB。
 
@@ -65,8 +65,8 @@ backend/
 ### Vue + Pinia + 本地通讯
 
 ```ts
-const cache = useLocalStorageSync('risk.local.alerts', []);
-const { history, post } = useBroadcastChannel('risk-alerts', 'risk-app', {
+const cache = useLocalStorageSync('signal-hub.local.alerts', []);
+const { history, post } = useBroadcastChannel('signal-sync-alerts', 'signal-hub', {
   onMessage(payload) {
     store.pushMessage({ id: crypto.randomUUID(), channel: 'broadcast', body: payload, createdAt: Date.now() });
   },
@@ -78,8 +78,8 @@ const { history, post } = useBroadcastChannel('risk-alerts', 'risk-app', {
 ```ts
 const bridge = new IframeBridge({
   bridgeUrl: 'https://comms.xxx.com/index.html',
-  channelName: 'risk-audit-sync',
-  allowedOrigins: ['https://risk.xxx.com', 'https://audit.xxx.com', 'https://comms.xxx.com'],
+  channelName: 'signal-sync-bridge',
+  allowedOrigins: ['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com', 'https://comms.xxx.com'],
   targetOrigin: 'https://comms.xxx.com',
   hmacSecret: 'demo-shared-secret',
   replayWindowMs: 15000,
@@ -91,12 +91,12 @@ bridge.onMessage((msg) => console.log(msg));
 ### WebSocket 自动重连 + 心跳
 
 ```ts
-const wsClient = createWsClient('ws://localhost:7001/ws/risk', {
+const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub', {
   heartbeatInterval: 8000,
   reconnectDelay: 3000,
 });
 wsClient.connect();
-wsClient.send({ type: 'risk-alert', body: 'from browser' });
+wsClient.send({ type: 'signal-hub-alert', body: 'from browser' });
 ```
 
 ### SSE 推送
@@ -116,7 +116,7 @@ export class SseController {
 
 ## 分享建议（讲稿大纲）
 
-1. **背景**：多端（风险、审计、移动、外部合作伙伴）对实时消息一致性的诉求不断升高。
+1. **背景**：多终端（主业务站点、观测大屏、移动入口、合作伙伴）对实时消息一致性的诉求不断升高。
 2. **同域优先用浏览器原生能力**：`localStorage/storage` + `BroadcastChannel` 成本最低，结合 Pinia 即可构成“本地总线”。
 3. **跨域必须有中继页**：`comms.xxx.com` 做最小可用面，iframe sandbox + origin 白名单 + HMAC 签名，彻底隔离业务域。
 4. **实时通讯分工**：SSE 负责后端 → 前端单向广播，WebSocket 承担需要回写的链路；二者统一进入 MessageService/MongoDB 留痕。

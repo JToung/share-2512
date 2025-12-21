@@ -15,6 +15,6 @@ export default {
     },
   },
   ws: {
-    path: '/ws',
+    path: '/ws/signal-hub',
   },
 } as MidwayConfig;

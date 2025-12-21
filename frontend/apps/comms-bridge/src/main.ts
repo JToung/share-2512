@@ -13,8 +13,8 @@ interface ClientInfo {
   lastSeen: number;
 }
 
-const allowedOrigins = new Set(['https://risk.xxx.com', 'https://audit.xxx.com']);
-const broadcastChannel = new BroadcastChannel('risk-audit-sync');
+const allowedOrigins = new Set(['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com']);
+const broadcastChannel = new BroadcastChannel('signal-sync-bridge');
 const clients = new Map<string, ClientInfo>();
 const seenNonces = new Set<string>();
 const encoder = new TextEncoder();

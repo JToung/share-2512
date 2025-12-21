@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <header>
-      <h1>风险端（risk.xxx.com）前端通讯演示</h1>
+      <h1>Signal Hub（signal-hub.xxx.com）前端通讯演示</h1>
       <p>
         同域优先使用浏览器原生能力，跨域通过公共中继页隔离，实时通讯在 WebSocket/SSE 之上叠加本地桥接，确保网络抖动下仍能保持多端一致。
       </p>
@@ -13,7 +13,7 @@
       <div class="grid">
         <article>
           <h3>localStorage 同步</h3>
-          <textarea v-model="newLocalAlert" placeholder="输入风险提示..." />
+          <textarea v-model="newLocalAlert" placeholder="输入示例消息..." />
           <button @click="pushLocal">localStorage 写入 + storage 事件</button>
           <pre>{{ localCache.state }}</pre>
         </article>
@@ -62,7 +62,7 @@
     <section>
       <h2>混合增强：SSE/WebSocket + iframe 通讯桥</h2>
       <p>
-        SSE 消息到达即通过 iframeBridge + BroadcastChannel 写入本地，若 SSE 断开则 fallback 至 HTTP 轮询，保持风控和审计端一致。
+        SSE 消息到达即通过 iframeBridge + BroadcastChannel 写入本地，若 SSE 断开则 fallback 至 HTTP 轮询，保持所有终端面板一致。
       </p>
       <pre>{{ mixedFlowLog }}</pre>
     </section>
@@ -79,7 +79,7 @@ import { useMessageStore } from './stores/messageStore';
 const messageStore = useMessageStore();
 
 const localCache = useLocalStorageSync<string[]>(
-  'risk.local.alerts',
+  'signal-hub.local.alerts',
   [],
   {
     onRemoteUpdate(value) {
@@ -95,8 +95,8 @@ const localCache = useLocalStorageSync<string[]>(
 const newLocalAlert = ref('');
 
 const { history: broadcastHistory, post: broadcastPost } = useBroadcastChannel<string>(
-  'risk-alerts',
-  'risk-app',
+  'signal-sync-alerts',
+  'signal-hub',
   {
     onMessage(payload) {
       messageStore.pushMessage({
@@ -110,7 +110,7 @@ const { history: broadcastHistory, post: broadcastPost } = useBroadcastChannel<s
 );
 const newBroadcastAlert = ref('');
 
-const wsClient = createWsClient('ws://localhost:7001/ws/risk', {
+const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub', {
   heartbeatInterval: 8_000,
   reconnectDelay: 3_000,
   logger(message, payload) {
@@ -129,8 +129,8 @@ let pollTimer: number | null = null;
 
 const iframeBridge = new IframeBridge({
   bridgeUrl: 'https://comms.xxx.com/index.html',
-  channelName: 'risk-audit-sync',
-  allowedOrigins: ['https://risk.xxx.com', 'https://audit.xxx.com', 'https://comms.xxx.com'],
+  channelName: 'signal-sync-bridge',
+  allowedOrigins: ['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com', 'https://comms.xxx.com'],
   targetOrigin: 'https://comms.xxx.com',
   hmacSecret: 'demo-shared-secret',
 });
@@ -149,14 +149,14 @@ function pushLocal() {
 
 function emitBroadcast() {
   if (!newBroadcastAlert.value) return;
-  broadcastPost(`[Risk] ${newBroadcastAlert.value}`);
+  broadcastPost(`[SignalHub] ${newBroadcastAlert.value}`);
   newBroadcastAlert.value = '';
 }
 
 function sendWs() {
   if (!newWsMessage.value) return;
   wsClient.send({
-    type: 'risk-alert',
+    type: 'signal-hub-alert',
     body: newWsMessage.value,
     ts: Date.now(),
   });
@@ -169,7 +169,7 @@ function reconnectSse() {
 }
 
 function replayIframe() {
-  iframeBridge.send('risk-alert', {
+  iframeBridge.send('signal-hub-alert', {
     body: `Manual replay ${Date.now()}`,
   });
 }

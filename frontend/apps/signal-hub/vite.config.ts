@@ -21,7 +21,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(workspaceRoot, 'dist/risk-app'),
+    outDir: path.resolve(workspaceRoot, 'dist/signal-hub'),
     emptyOutDir: true,
     rollupOptions: {
       input: path.resolve(appRoot, 'index.html'),

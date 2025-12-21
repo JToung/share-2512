@@ -34,7 +34,7 @@ pnpm run dev
 
 | API | 说明 |
 | --- | --- |
-| `GET /api/sse/stream` | 建立 SSE 流，用于 risk/audit 端订阅 |
+| `GET /api/sse/stream` | 建立 SSE 流，用于 Signal Hub / Signal Viewer 订阅 |
 | `POST /api/sse/message` | 将消息写入 Mongo 并推送到所有 SSE 客户端 |
 | `GET /api/sse/broadcast/test` | 快速触发一次 SSE 推送 |
 | `POST /api/ws/message` | 通过 HTTP 发布 WebSocket 消息（后端会转发给在线 WS 客户端） |

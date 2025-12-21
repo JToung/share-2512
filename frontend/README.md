@@ -5,8 +5,8 @@
 ```
 frontend/
 ├─ apps/
-│  ├─ risk-app/        # 生产侧风控应用，演示全部通讯策略
-│  ├─ audit-app/       # 审计端消费，演示桥接回放
+│  ├─ signal-hub/          # Signal Hub（跨端通讯中枢）应用，演示全部通讯策略
+│  ├─ signal-viewer/          # Signal Viewer（多端观测面板）消费，演示桥接回放
 │  └─ comms-bridge/    # comms.xxx.com 中继页，实现 postMessage + BroadcastChannel
 └─ packages/
    ├─ bridge-sdk/      # IframeBridge 安全 & 生命周期封装
@@ -18,24 +18,24 @@ frontend/
 
 | 场景 | 文件 | 说明 |
 | --- | --- | --- |
-| localStorage / storage | `apps/risk-app/src/App.vue` | `useLocalStorageSync` 自动写入 + storage 事件回流 |
+| localStorage / storage | `apps/signal-hub/src/App.vue` | `useLocalStorageSync` 自动写入 + storage 事件回流 |
 | BroadcastChannel | `packages/local-comm/src/index.ts` | `useBroadcastChannel` 提供 history + onMessage |
 | IframeBridge | `packages/bridge-sdk/src/index.ts` | origin 白名单、targetOrigin、HMAC、防重放、beforeunload 清理 |
 | 公共中继页 | `apps/comms-bridge/src/main.ts` | 中继页验证签名，二次广播到 BroadcastChannel |
-| SSE | `apps/risk-app/src/App.vue` & `apps/audit-app/src/App.vue` | EventSource 监听 + fallback 到 HTTP Poll |
+| SSE | `apps/signal-hub/src/App.vue` & `apps/signal-viewer/src/App.vue` | EventSource 监听 + fallback 到 HTTP Poll |
 | WebSocket | `packages/ws-client/src/index.ts` | 心跳、自动重连、send 包装 |
-| 混合增强 | `apps/risk-app/src/App.vue` | SSE 到达 -> iframeBridge -> BroadcastChannel -> audit |
+| 混合增强 | `apps/signal-hub/src/App.vue` | SSE 到达 -> iframeBridge -> BroadcastChannel -> Signal Viewer |
 
 ## Pinia + 业务示例
 
-`apps/risk-app/src/stores/messageStore.ts` 维护统一消息流，`App.vue` 中对 all channels 的消息统一落盘并在网络抖动时记录 `lastNetworkGapMs`。
+`apps/signal-hub/src/stores/messageStore.ts` 维护统一消息流，`App.vue` 中对 all channels 的消息统一落盘并在网络抖动时记录 `lastNetworkGapMs`。
 
 ## 运行思路
 
 1. 将 comms-bridge 部署为独立域（`comms.xxx.com`），并在宿主页面以 sandbox iframe 懒加载。
-2. 风控端（`risk-app`）SSE 获取后端推送，再通过 `IframeBridge` + `BroadcastChannel` 广播给审计端。
-3. 审计端（`audit-app`）监听桥接消息，同时独立消费 SSE 以验证桥接质量。
-4. 当 SSE 断开后，`risk-app` 自动退化到 `httpPoll`，并继续通过 iframe 通知审计端。
+2. Signal Hub SSE 获取后端推送，再通过 `IframeBridge` + `BroadcastChannel` 广播给 Signal Viewer。
+3. Signal Viewer 监听桥接消息，同时独立消费 SSE 以验证桥接质量。
+4. 当 SSE 断开后，Signal Hub 自动退化到 `httpPoll`，并继续通过 iframe 通知 Signal Viewer。
 
 ## 项目运行
 
@@ -43,29 +43,29 @@ frontend/
 # 前端
 cd frontend
 pnpm install
-pnpm run dev:risk   # http://localhost:4173
-pnpm run dev:audit  # http://localhost:4174
-pnpm run dev:comms  # http://localhost:4175
+pnpm run dev:signal-hub   # http://localhost:4173
+pnpm run dev:signal-viewer   # http://localhost:4174
+pnpm run dev:comms    # http://localhost:4175
 
 # 后端（在 backend/ 下）
 pnpm install
-pnpm run dev        # MidwayJS + MongoDB，默认端口 7001
+pnpm run dev          # MidwayJS + MongoDB，默认端口 7001
 ```
 
-> 提示：三个 Vite 应用共用 `packages/*`，如需生产构建可执行 `pnpm run build:risk|audit|comms`；若要一次性检查类型，使用 `pnpm run typecheck`。
+> 提示：三个 Vite 应用共用 `packages/*`，如需生产构建可执行 `pnpm run build:signal-hub|signal-viewer|comms`；若要一次性检查类型，使用 `pnpm run typecheck`。
 
 ## 关键代码片段
 
 ```ts
 // localStorage + storage 事件双向同步
-const cache = useLocalStorageSync('risk.local.alerts', [], {
+const cache = useLocalStorageSync('signal-hub.local.alerts', [], {
   onRemoteUpdate(value) {
     console.info('storage updated', value);
   },
 });
 
 // BroadcastChannel reactive 封装
-const { history, post } = useBroadcastChannel('risk-alerts', 'risk-app', {
+const { history, post } = useBroadcastChannel('signal-sync-alerts', 'signal-hub', {
   onMessage(payload) {
     console.log('channel payload', payload);
   },
@@ -74,8 +74,8 @@ const { history, post } = useBroadcastChannel('risk-alerts', 'risk-app', {
 // iframeBridge 懒加载 + HMAC 校验
 const bridge = new IframeBridge({
   bridgeUrl: 'https://comms.xxx.com/index.html',
-  channelName: 'risk-audit-sync',
-  allowedOrigins: ['https://risk.xxx.com', 'https://audit.xxx.com', 'https://comms.xxx.com'],
+  channelName: 'signal-sync-bridge',
+  allowedOrigins: ['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com', 'https://comms.xxx.com'],
   targetOrigin: 'https://comms.xxx.com',
   hmacSecret: 'demo-shared-secret',
 });
@@ -83,7 +83,7 @@ await bridge.init();
 bridge.onMessage((message) => console.log('bridge', message));
 
 // WebSocket 自动重连 + 心跳
-const client = createWsClient('ws://localhost:7001/ws/risk', {
+const client = createWsClient('ws://localhost:7001/ws/signal-hub', {
   reconnectDelay: 3_000,
   heartbeatInterval: 8_000,
 });
