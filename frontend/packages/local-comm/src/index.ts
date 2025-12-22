@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, Ref, watch } from 'vue';
 
-/** Envelope format shared by all local communication helpers. */
+/** 本地通信统一的 Envelope，方便追踪消息来源与时间戳。 */
 export interface BroadcastEnvelope<T> {
   id: string;
   source: string;
@@ -34,9 +34,7 @@ export interface BroadcastChannelComposable<T> {
   close: () => void;
 }
 
-/**
- * Lightweight wrapper around BroadcastChannel with Vue friendly reactivity.
- */
+/** BroadcastChannel 的 Vue 友好封装，附带消息历史与 onMessage。 */
 export function useBroadcastChannel<T>(
   name: string,
   source: string,
@@ -78,9 +76,7 @@ export interface LocalStorageSyncOptions<T> {
   onRemoteUpdate?: (value: T) => void;
 }
 
-/**
- * Two way data synchronisation via localStorage + storage event.
- */
+/** 基于 localStorage + storage 事件的双向同步 Hook。 */
 export function useLocalStorageSync<T>(
   key: string,
   initialValue: T,
@@ -121,9 +117,7 @@ export function useLocalStorageSync<T>(
   };
 }
 
-/**
- * Simple HTTP polling helper to emphasise the cost of fallback solutions.
- */
+/** 网络抖动时的兜底轮询工具，保持接口一致性。 */
 export async function httpPoll<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   if (!response.ok) {

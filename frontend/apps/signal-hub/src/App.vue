@@ -71,11 +71,12 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { httpPoll, useBroadcastChannel, useLocalStorageSync } from '../../packages/local-comm/src';
-import { createWsClient } from '../../packages/ws-client/src';
-import { IframeBridge } from '../../packages/bridge-sdk/src';
+import { httpPoll, useBroadcastChannel, useLocalStorageSync } from '@packages/local-comm';
+import { createWsClient } from '@packages/ws-client';
+import { IframeBridge } from '@packages/bridge-sdk';
 import { useMessageStore } from './stores/messageStore';
 
+// Signal Hub 页面：串联本地缓存、跨域桥、SSE、WebSocket、HTTP Poll 的示例状态。
 const messageStore = useMessageStore();
 
 const localCache = useLocalStorageSync<string[]>(
@@ -110,6 +111,7 @@ const { history: broadcastHistory, post: broadcastPost } = useBroadcastChannel<s
 );
 const newBroadcastAlert = ref('');
 
+// WebSocket 客户端，模拟需要向后端主动上传的数据链路。
 const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub', {
   heartbeatInterval: 8_000,
   reconnectDelay: 3_000,
@@ -142,18 +144,21 @@ const mixedFlowLog = ref<string[]>([]);
 const lastGap = computed(() => messageStore.lastNetworkGapMs);
 
 function pushLocal() {
+  // 写入 localStorage，触发 storage 事件，从而模拟同域缓存同步。
   if (!newLocalAlert.value) return;
   localCache.write([...localCache.state.value, `${Date.now()}: ${newLocalAlert.value}`]);
   newLocalAlert.value = '';
 }
 
 function emitBroadcast() {
+  // BroadcastChannel 负责同域标签页之间的快速同步。
   if (!newBroadcastAlert.value) return;
   broadcastPost(`[SignalHub] ${newBroadcastAlert.value}`);
   newBroadcastAlert.value = '';
 }
 
 function sendWs() {
+  // 通过 WS 将策略/命令上传后端，再由后端 fan-out。
   if (!newWsMessage.value) return;
   wsClient.send({
     type: 'signal-hub-alert',
@@ -169,6 +174,7 @@ function reconnectSse() {
 }
 
 function replayIframe() {
+  console.log('Replay iframe bridge...');
   iframeBridge.send('signal-hub-alert', {
     body: `Manual replay ${Date.now()}`,
   });
@@ -185,6 +191,7 @@ function recordMixedFlow(step: string) {
 }
 
 const startSse = () => {
+  // Signal Hub 作为“官方来源”，通过 SSE 接收后端消息。
   recordMixedFlow('SSE connecting...');
   eventSource = new EventSource('http://localhost:7001/api/sse/stream');
   eventSource.onmessage = (event) => {
@@ -201,6 +208,7 @@ const startSse = () => {
     recordMixedFlow('SSE delivered + iframe fan-out');
   };
   eventSource.onerror = () => {
+    // 记录抖动时间差并提示 fallback。
     const gap = Date.now() - lastSseTs;
     messageStore.trackNetworkGap(gap);
     recordMixedFlow('SSE offline, fallback to HTTP polling');
@@ -213,6 +221,7 @@ const teardownSse = () => {
 };
 
 const startPolling = () => {
+  // HTTP Poll 在 SSE 断线时兜底，周期性抓取最近消息。
   pollTimer = window.setInterval(async () => {
     try {
       const messages = await httpPoll<string[]>('http://localhost:7001/api/sse/messages?limit=3');

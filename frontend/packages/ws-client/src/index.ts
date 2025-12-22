@@ -13,9 +13,7 @@ export interface WsClient {
   close: () => void;
 }
 
-/**
- * Creates a resilient WebSocket client with automatic reconnection and heartbeat frames.
- */
+/** 创建带自动重连与心跳的 WebSocket 客户端，便于在 Vue 组件中复用。 */
 export function createWsClient(url: string, options: WsClientOptions = {}): WsClient {
   const { reconnectDelay = 2_000, heartbeatInterval = 10_000, logger = () => undefined } = options;
   const status = ref<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle');
@@ -25,6 +23,7 @@ export function createWsClient(url: string, options: WsClientOptions = {}): WsCl
   let reconnectTimer: number | null = null;
 
   const clearHeartbeat = () => {
+    // 防止重复计时器，确保设备休眠后不会持续发送。
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
@@ -32,6 +31,7 @@ export function createWsClient(url: string, options: WsClientOptions = {}): WsCl
   };
 
   const scheduleReconnect = () => {
+    // 避免在手动 close 后继续重连，因此需检测状态。
     if (reconnectTimer || status.value === 'closed') {
       return;
     }
@@ -42,6 +42,7 @@ export function createWsClient(url: string, options: WsClientOptions = {}): WsCl
   };
 
   const startHeartbeat = () => {
+    // 发送轻量 heartbeat，便于后端检测连接健康度。
     clearHeartbeat();
     heartbeatTimer = window.setInterval(() => {
       if (socket && socket.readyState === WebSocket.OPEN) {
@@ -51,6 +52,7 @@ export function createWsClient(url: string, options: WsClientOptions = {}): WsCl
   };
 
   const connect = () => {
+    // 对上行/下行统一打点，排查时可快速定位阶段。
     status.value = 'connecting';
     socket = new WebSocket(url);
 

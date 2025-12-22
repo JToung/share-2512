@@ -1,3 +1,4 @@
+/** 中继页对 postMessage/BroadcastChannel 的 Envelope 定义。 */
 interface BridgeMessage<T = unknown> {
   id: string;
   type: string;
@@ -14,6 +15,7 @@ interface ClientInfo {
 }
 
 const allowedOrigins = new Set(['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com']);
+// 负责与宿主页共享消息，等同于“二次广播层”。
 const broadcastChannel = new BroadcastChannel('signal-sync-bridge');
 const clients = new Map<string, ClientInfo>();
 const seenNonces = new Set<string>();
@@ -23,6 +25,7 @@ const replayWindowMs = 15_000;
 let cryptoKeyPromise: Promise<CryptoKey> | null = null;
 
 const handshake = (clientId: string, info: ClientInfo) => {
+  // 保存客户端信息，并通过 ack 告知 iframe 已准备就绪。
   clients.set(clientId, info);
   info.window.postMessage(
     {
@@ -38,6 +41,7 @@ const handshake = (clientId: string, info: ClientInfo) => {
 };
 
 const pruneClients = () => {
+  // 定期清理长时间不活跃的窗口，避免持有失效引用。
   const now = Date.now();
   [...clients.entries()].forEach(([clientId, info]) => {
     if (now - info.lastSeen > 60_000) {
@@ -47,6 +51,7 @@ const pruneClients = () => {
 };
 
 const handleBridgeMessage = async (event: MessageEvent<BridgeMessage>) => {
+  // 核心入口：校验来源、timestamp、nonce、HMAC 后再转发。
   if (!event.source || !allowedOrigins.has(event.origin)) {
     return;
   }

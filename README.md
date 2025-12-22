@@ -8,7 +8,7 @@
 frontend/
   apps/
     signal-hub/            # Signal Hub（通讯中枢）主应用（Pinia 状态 + 全量示例）
-    signal-viewer/            # Signal Viewer（观测面板）消费示例
+    signal-viewer/         # Signal Viewer（观测面板）消费示例
     comms-bridge/      # comms.xxx.com 公共中继页
   packages/
     bridge-sdk/        # IframeBridge（origin 校验 + HMAC + sandbox）

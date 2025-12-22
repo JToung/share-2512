@@ -5,8 +5,8 @@
 ```
 frontend/
 ├─ apps/
-│  ├─ signal-hub/          # Signal Hub（跨端通讯中枢）应用，演示全部通讯策略
-│  ├─ signal-viewer/          # Signal Viewer（多端观测面板）消费，演示桥接回放
+│  ├─ signal-hub/      # Signal Hub（跨端通讯中枢）应用，演示全部通讯策略
+│  ├─ signal-viewer/   # Signal Viewer（多端观测面板）消费，演示桥接回放
 │  └─ comms-bridge/    # comms.xxx.com 中继页，实现 postMessage + BroadcastChannel
 └─ packages/
    ├─ bridge-sdk/      # IframeBridge 安全 & 生命周期封装

@@ -23,9 +23,10 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
-import { useBroadcastChannel } from '../../packages/local-comm/src';
-import { IframeBridge } from '../../packages/bridge-sdk/src';
+import { useBroadcastChannel } from '@packages/local-comm';
+import { IframeBridge } from '@packages/bridge-sdk';
 
+// Signal Viewer：专注于消费 Signal Hub + SSE 的观测面板。
 const bridge = new IframeBridge({
   bridgeUrl: 'https://comms.xxx.com/index.html',
   channelName: 'signal-sync-bridge',
@@ -44,11 +45,13 @@ let eventSource: EventSource | null = null;
 const requestSync = () => bridge.send('signal-viewer-sync-request', { ts: Date.now() });
 
 onMounted(async () => {
+  // 初始化中继 iframe，并监听广播消息。
   await bridge.init();
   disposeBridge = bridge.onMessage((msg) => {
     bridgeMessages.value = [`${msg.type}: ${JSON.stringify(msg.payload)}`, ...bridgeMessages.value].slice(0, 10);
   });
 
+  // Viewer 也会直接消费后端 SSE，方便对比桥接质量。
   eventSource = new EventSource('http://localhost:7001/api/sse/stream?consumer=signal-viewer');
   eventSource.onmessage = (event) => {
     sseMirror.value = [`SSE ${event.data}`, ...sseMirror.value].slice(0, 6);
