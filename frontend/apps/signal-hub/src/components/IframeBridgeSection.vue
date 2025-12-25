@@ -12,7 +12,7 @@
       class="message-input"
     />
     <div class="action-row">
-      <button @click="emit('replay', newWsMessage)">向 comms.xxx.com 派发数据</button>
+      <button @click="emit('replay', newWsMessage)">向 中继页 派发数据</button>
       <button @click="emit('broadcast')">将最新 SSE 消息写入桥</button>
     </div>
     <div class="log-panel">

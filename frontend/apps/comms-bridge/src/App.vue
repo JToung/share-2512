@@ -1,36 +1,47 @@
 <template>
+  <!-- ================= 页面容器 ================= -->
   <div class="page">
+    <!-- ================= 顶部说明区域 ================= -->
     <header class="hero">
       <p class="eyebrow">Secure Bridge Monitor</p>
       <h1>Bridge Relay 中继页</h1>
       <p>
-        负责接收来自 Signal Hub / Signal Viewer 的 postMessage，通过 timestamp + nonce + HMAC 校验，并在通过校验后写入
-        BroadcastChannel 统一 fan-out。下面的监控面板会实时展示完整的消息 Envelope，方便排查握手与广播链路。
+        负责接收来自 Signal Hub / Signal Viewer 的 postMessage，
+        通过 timestamp + nonce + HMAC 校验，
+        校验通过后写入 BroadcastChannel 统一 fan-out。
+        下方监控面板用于实时观察消息流转情况。
       </p>
     </header>
 
+    <!-- ================= 统计信息 ================= -->
     <section class="stats-grid">
       <article class="stat-card">
-        <div class="stat-label">Inbound Messages（入站消息数）</div>
+        <div class="stat-label">Inbound Messages（入站）</div>
         <div class="stat-value">{{ state.stats.receivedTotal }}</div>
       </article>
       <article class="stat-card">
-        <div class="stat-label">Outbound Messages（出站消息数）</div>
+        <div class="stat-label">Outbound Messages（出站）</div>
         <div class="stat-value">{{ state.stats.sentTotal }}</div>
       </article>
       <article class="stat-card">
-        <div class="stat-label">Active Clients（活跃 Client 数）</div>
-        <div class="stat-value">{{ state.stats.clientCount }}</div>
+        <div class="stat-label">Connected Clients（已连接 Client）</div>
+        <div class="stat-value">{{ clientCount }}</div>
       </article>
     </section>
 
+    <!-- ================= 日志面板 ================= -->
     <div class="log-grid">
-      <section v-for="section in logSections" :key="section.id" class="log-panel">
+      <section
+        v-for="section in logSections"
+        :key="section.id"
+        class="log-panel"
+      >
         <div class="panel-head">
           <h2>{{ section.title }}</h2>
           <span class="panel-pill">{{ section.pill }}</span>
         </div>
         <p class="section-note">{{ section.note }}</p>
+
         <ul class="log-list">
           <li
             v-for="entry in getLogs(section.direction)"
@@ -38,19 +49,31 @@
             :class="['log-item', { 'is-bridge-event': entry.highlight }]"
           >
             <div class="log-header">
-              <span :class="['log-pill', entry.direction === 'received' ? 'inbound' : 'outbound']">
+              <span
+                :class="[
+                  'log-pill',
+                  entry.direction === 'received' ? 'inbound' : 'outbound'
+                ]"
+              >
                 {{ section.direction === 'received' ? 'Inbound' : 'Outbound' }}
               </span>
               <span class="log-type">{{ entry.message.type }}</span>
               <span class="log-id">{{ formatShort(entry.message.id) }}</span>
               <span class="log-time">{{ formatClock(entry.timestamp) }}</span>
             </div>
-            <div v-if="entry.detail" class="log-detail">{{ entry.detail }}</div>
+
+            <div v-if="entry.detail" class="log-detail">
+              {{ entry.detail }}
+            </div>
+
             <div class="log-meta">
               <span>source: {{ entry.message.sourceId || 'bridge' }}</span>
               <span>nonce: {{ formatShort(entry.message.nonce) }}</span>
-              <span>signature: {{ formatShort(entry.message.signature, 12) }}</span>
+              <span>
+                signature: {{ formatShort(entry.message.signature, 12) }}
+              </span>
             </div>
+
             <pre class="log-json">{{ entry.json }}</pre>
           </li>
         </ul>
@@ -60,68 +83,43 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
+import { BridgeMessage, ClientInfo, LogDirection, LogEntry } from './types';
 
-interface BridgeMessage<T = unknown> {
-  id: string;
-  type: string;
-  payload: T;
-  timestamp: number;
-  nonce: string;
-  signature: string;
-  sourceId: string;
-}
-
-interface ClientInfo {
-  id: string;
-  origin: string;
-  window: Window;
-  lastSeen: number;
-}
-
-type LogDirection = 'received' | 'sent';
-
-interface LogEntry {
-  key: string;
-  direction: LogDirection;
-  message: BridgeMessage;
-  detail: string;
-  highlight: boolean;
-  timestamp: number;
-  json: string;
-}
-
+// 允许接入 Bridge 的 origin 白名单
 const allowedOrigins = new Set([
-  'https://signal-hub.xxx.com',
-  'https://signal-viewer.xxx.com',
   'http://localhost:4173',
   'http://localhost:4174',
   'http://localhost:4175',
 ]);
 
+// 同源 BroadcastChannel，用于 bridge → clients 的统一 fan-out
 const broadcastChannel = new BroadcastChannel('signal-sync-bridge');
+// 监控面板之间共享日志的通道
+const logSyncChannel = new BroadcastChannel('signal-sync-bridge-ui-sync');
+const tabId = crypto.randomUUID();
+
+// 已完成握手的 Client 注册表
 const clients = new Map<string, ClientInfo>();
+
+// 已使用的 nonce 集合，用于防止重放攻击
 const seenNonces = new Set<string>();
+
+// HMAC 相关基础配置
 const encoder = new TextEncoder();
 const hmacSecret = 'demo-shared-secret';
 const replayWindowMs = 15_000;
 let cryptoKeyPromise: Promise<CryptoKey> | null = null;
 
+/* ================= UI & 状态 ================= */
+
 const logLimit = 80;
-const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  hour12: false,
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-});
+const clientCount = computed(() => new Set(state.logs.received.map(entry => entry.message.sourceId)).size);
 
 const state = reactive({
   stats: {
     receivedTotal: 0,
     sentTotal: 0,
-    clientCount: 0,
   },
   logs: {
     received: [] as LogEntry[],
@@ -133,182 +131,208 @@ const logSections = [
   {
     id: 'received',
     title: '接收到的消息',
-    note: '展示所有进入 Bridge 的 postMessage 请求（包含握手）。',
+    note: '所有进入 Bridge 的 postMessage。',
     pill: 'Inbound',
     direction: 'received' as LogDirection,
   },
   {
     id: 'sent',
     title: '发送出去的消息',
-    note: '展示 Bridge 广播以及发出的 bridge:ack、BroadcastChannel fan-out。',
+    note: 'bridge:ack 及 BroadcastChannel fan-out。',
     pill: 'Outbound',
     direction: 'sent' as LogDirection,
   },
 ];
 
-const getLogs = (direction: LogDirection) =>
-  direction === 'received' ? state.logs.received : state.logs.sent;
+/* ================= 工具函数 ================= */
 
-function formatClock(timestamp: number) {
-  return timeFormatter.format(timestamp);
-}
+/**
+ * 根据方向返回对应日志列表
+ */
+const getLogs = (d: LogDirection) =>
+  d === 'received' ? state.logs.received : state.logs.sent;
 
+/**
+ * 截断长字符串，用于 UI 展示
+ */
 function formatShort(value: string, visible = 6) {
-  if (!value) return '—';
-  return value.length <= visible ? value : `${value.slice(0, visible)}…`;
+  return value?.length > visible ? value.slice(0, visible) + '…' : value || '—';
 }
 
-function formatMessage(message: BridgeMessage) {
-  try {
-    return JSON.stringify(message, null, 2);
-  } catch {
-    return '[message 无法序列化]';
-  }
+/**
+ * 格式化时间戳为可读时间
+ */
+function formatClock(ts: number) {
+  return new Date(ts).toLocaleTimeString();
 }
 
-function appendLog(direction: LogDirection, message: BridgeMessage, detail: string) {
+/**
+ * 写入一条日志，同时维护最大日志数量与统计信息
+ * - 可选是否广播到其他标签页
+ * @param direction 日志方向
+ * @param message 消息内容
+ * @param detail 详情描述
+ * @param options 选项配置
+ * @param options.broadcast 是否广播到其他标签页，默认 true
+ */
+function appendLog(
+  direction: LogDirection,
+  message: BridgeMessage,
+  detail: string,
+  options: { broadcast?: boolean } = {}
+) {
+  const { broadcast = true } = options;
+  // bridge:* 事件单独高亮，方便区分系统事件
   const entry: LogEntry = {
-    key: `${direction}-${message.id}-${message.nonce}-${crypto.randomUUID()}`,
+    key: crypto.randomUUID(),
     direction,
     message,
     detail,
     highlight: message.type.startsWith('bridge:'),
     timestamp: message.timestamp,
-    json: formatMessage(message),
+    json: JSON.stringify(message, null, 2),
   };
 
-  const target = direction === 'received' ? state.logs.received : state.logs.sent;
+  const target =
+    direction === 'received'
+      ? state.logs.received
+      : state.logs.sent;
+
   target.unshift(entry);
-  if (target.length > logLimit) {
-    target.splice(logLimit);
+  if (target.length > logLimit) target.pop();
+
+  direction === 'received'
+    ? state.stats.receivedTotal++
+    : state.stats.sentTotal++;
+
+  if (broadcast) {
+    logSyncChannel.postMessage({
+      type: 'bridge:log-sync',
+      source: tabId,
+      payload: { direction, message, detail },
+    });
   }
-
-  if (direction === 'received') {
-    state.stats.receivedTotal += 1;
-  } else {
-    state.stats.sentTotal += 1;
-  }
 }
 
-function logReceivedMessage(message: BridgeMessage, detail: string) {
-  appendLog('received', message, detail);
-}
+/* ================= 核心逻辑 ================= */
 
-function logSentMessage(message: BridgeMessage, detail: string) {
-  appendLog('sent', message, detail);
-}
-
-function updateClientCount() {
-  state.stats.clientCount = clients.size;
-}
-
+/**
+ * 处理 Client 的 bridge:hello 握手请求
+ * - 注册 clientId
+ * - 记录 origin 与 window 引用
+ * - 返回 bridge:ack
+ */
 async function handshake(event: MessageEvent<BridgeMessage>) {
-  if (!event.source) return;
-
   const { clientId } = (event.data.payload ?? {}) as { clientId?: string };
-  if (!clientId) {
-    console.warn('❌ 握手失败：缺少 clientId');
-    return;
-  }
+  if (!clientId) return;
 
-  const info: ClientInfo = {
+  clients.set(clientId, {
     id: clientId,
     origin: event.origin,
     window: event.source as Window,
     lastSeen: Date.now(),
-  };
+  });
 
-  clients.set(clientId, info);
-  updateClientCount();
-  console.log('✅ Client 注册完成:', clientId);
-
+  // bridge 自身发出的消息同样走完整签名流程
   const ack = await sign({
     type: 'bridge:ack',
     payload: { clientId },
     sourceId: 'bridge',
   });
 
-  info.window.postMessage(ack, info.origin);
-  logSentMessage(ack, `bridge:ack → ${clientId} @ ${info.origin}`);
+  (event.source as Window).postMessage(ack, event.origin);
+  appendLog('sent', ack, `bridge:ack → ${clientId}`);
 }
 
+/**
+ * postMessage 的统一入口
+ * - 校验来源
+ * - 校验安全字段
+ * - 分发到握手或广播逻辑
+ */
 async function handleIncomingMessage(event: MessageEvent<BridgeMessage>) {
-  if (!event.source || !allowedOrigins.has(event.origin)) {
-    console.warn('❌ 拒绝非法来源:', event.origin);
-    return;
-  }
+  if (!allowedOrigins.has(event.origin)) return;
 
   const msg = event.data;
 
+  // 任一安全校验失败，消息直接丢弃
   if (
     !verifyTimestamp(msg) ||
     !verifyNonce(msg) ||
     !(await verifySignature(msg))
   ) {
-    console.warn('❌ 消息安全校验失败:', msg);
     return;
   }
 
-  const handshakePayload = (msg.payload ?? {}) as { clientId?: string };
-  const detail =
-    msg.type === 'bridge:hello'
-      ? `握手请求 · clientId=${handshakePayload.clientId ?? '未知'} · origin=${event.origin}`
-      : `来源 ${msg.sourceId} @ ${event.origin}`;
-  logReceivedMessage(msg, detail);
+  appendLog('received', msg, `from ${msg.sourceId}`);
 
+  // 握手消息单独处理
   if (msg.type === 'bridge:hello') {
     await handshake(event);
     return;
   }
 
-  const client = clients.get(msg.sourceId);
-  if (!client || client.origin !== event.origin) {
-    console.warn('❌ 未注册 Client 或 origin 不匹配:', msg.sourceId);
-    return;
-  }
-
-  client.lastSeen = Date.now();
+  // 业务消息进入 BroadcastChannel
   broadcastChannel.postMessage(msg);
 }
 
+/**
+ * BroadcastChannel 消息监听
+ * - 将消息 fan-out 到所有已注册 Client
+ */
 const broadcastListener = (event: MessageEvent) => {
   const msg = event.data as BridgeMessage;
-  const recipients: string[] = [];
-
-  clients.forEach((client, clientId) => {
-    if (clientId === msg.sourceId) return;
-
-    try {
+  
+  clients.forEach((client, id) => {
+    // 跳过消息原发送方，避免自回环
+    if (id !== msg.sourceId) {
       client.window.postMessage(msg, client.origin);
-      recipients.push(`${clientId} @ ${client.origin}`);
-    } catch {
-      clients.delete(clientId);
-      updateClientCount();
     }
   });
 
-  const detail = recipients.length
-    ? `fan-out → ${recipients.join(', ')}`
-    : 'fan-out skipped（无可用 client）';
-  logSentMessage(msg, detail);
+  // 不广播 fan-out 消息，避免循环同步
+  appendLog('sent', msg, 'fan-out', { broadcast: false });
 };
 
-function pruneClients() {
-  const now = Date.now();
-  let removed = false;
-  for (const [id, client] of clients) {
-    if (now - client.lastSeen > 60 * 60 * 1000) {
-      clients.delete(id);
-      removed = true;
-    }
-  }
-  if (removed) updateClientCount();
-}
+/**
+ * 监听其他标签同步过来的日志，保持 UI 显示一致
+ */
+const logSyncListener = (
+  event: MessageEvent<{
+    type?: string;
+    source?: string;
+    payload?: {
+      direction: LogDirection;
+      message: BridgeMessage;
+      detail: string;
+    };
+  }>
+) => {
+  const payload = event.data;
+  if (!payload || payload.type !== 'bridge:log-sync') return;
+  if (payload.source === tabId) return;
+  if (!payload.payload) return;
 
+  appendLog(
+    payload.payload.direction,
+    payload.payload.message,
+    payload.payload.detail,
+    { broadcast: false }
+  );
+};
+
+/* ================= 安全校验 ================= */
+
+/**
+ * 校验时间戳是否在允许的重放窗口内
+ */
 function verifyTimestamp(msg: BridgeMessage) {
   return Math.abs(Date.now() - msg.timestamp) <= replayWindowMs;
 }
 
+/**
+ * 校验 nonce 是否被使用过
+ */
 function verifyNonce(msg: BridgeMessage) {
   if (seenNonces.has(msg.nonce)) return false;
   seenNonces.add(msg.nonce);
@@ -316,6 +340,9 @@ function verifyNonce(msg: BridgeMessage) {
   return true;
 }
 
+/**
+ * 校验 HMAC 签名是否匹配
+ */
 async function verifySignature(msg: BridgeMessage) {
   const key = await getCryptoKey();
   const payload = encoder.encode(
@@ -329,6 +356,9 @@ async function verifySignature(msg: BridgeMessage) {
   return crypto.subtle.verify('HMAC', key, sig, payload);
 }
 
+/**
+ * 为 Bridge 发出的消息生成完整签名
+ */
 async function sign(
   partial: Omit<BridgeMessage, 'id' | 'timestamp' | 'nonce' | 'signature'>
 ) {
@@ -353,6 +383,9 @@ async function sign(
   return msg;
 }
 
+/**
+ * 延迟初始化并缓存 CryptoKey，避免重复 import
+ */
 function getCryptoKey() {
   if (!cryptoKeyPromise) {
     cryptoKeyPromise = crypto.subtle.importKey(
@@ -366,35 +399,24 @@ function getCryptoKey() {
   return cryptoKeyPromise;
 }
 
-const messageListener = (event: MessageEvent<BridgeMessage>) => {
-  void handleIncomingMessage(event);
-};
-
-const beforeUnloadListener = () => {
-  broadcastChannel.close();
-  clients.clear();
-  updateClientCount();
-};
-
-let pruneTimer: number | undefined;
+/* ================= 生命周期 ================= */
 
 onMounted(() => {
-  window.addEventListener('message', messageListener);
+  // 仅在 Bridge 页面存活时监听通信
+  window.addEventListener('message', handleIncomingMessage);
   broadcastChannel.addEventListener('message', broadcastListener);
-  window.addEventListener('beforeunload', beforeUnloadListener);
-  pruneTimer = window.setInterval(pruneClients, 30_000);
+  logSyncChannel.addEventListener('message', logSyncListener);
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('message', messageListener);
+  // 页面卸载时释放资源，避免内存泄漏
+  window.removeEventListener('message', handleIncomingMessage);
   broadcastChannel.removeEventListener('message', broadcastListener);
-  window.removeEventListener('beforeunload', beforeUnloadListener);
-  if (pruneTimer) window.clearInterval(pruneTimer);
   broadcastChannel.close();
+  logSyncChannel.removeEventListener('message', logSyncListener);
+  logSyncChannel.close();
   clients.clear();
 });
-
-updateClientCount();
 </script>
 
 <style scoped>

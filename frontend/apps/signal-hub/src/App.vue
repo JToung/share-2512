@@ -116,6 +116,14 @@ const iframeBridge = new IframeBridge({
 });
 const bridgeLog = ref<string[]>([]);
 let disposeBridge: (() => void) | undefined;
+
+// Vite HMR 会重新执行模块顶层代码，这里确保旧实例被销毁，避免重复 clientId 残留在中继页
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    iframeBridge.destroy();
+  });
+}
+
 const { state: latestBridgeSnapshot } = useLocalStorageObserver<BridgeMessage<unknown> | null>(
   BRIDGE_STORAGE_KEY,
   null,
@@ -161,7 +169,6 @@ function reconnectSse() {
 
 // 手动触发 iframe 桥发送消息，模拟用户操作。
 function replayIframe(message: string) {
-  console.log('Replay iframe bridge...');
   iframeBridge.send('signal-hub-alert', {
     body: message,
   }, (message) => {
@@ -250,6 +257,12 @@ onMounted(async () => {
   wsClient.connect();
   startSse();
   await iframeBridge.init();
+  /**
+   * bridge.onMessage 监听 IframeBridge 统一出口的消息
+   * 这些消息可能来源于 iframe 的 postMessage，也可能来源于 BroadcastChannel
+   * 但不包括所有原始 iframe / BroadcastChannel 消息。
+   * 在这里处理这些消息，方便观察桥接效果。
+   */
   disposeBridge = iframeBridge.onMessage((message) => {
     bridgeLog.value = [`${message.type}: ${JSON.stringify(message.payload)}`, ...bridgeLog.value].slice(0, 8);
     messageStore.pushMessage({

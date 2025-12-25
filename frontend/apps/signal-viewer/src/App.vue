@@ -42,7 +42,7 @@ import { createWsClient } from '@packages/ws-client';
 
 // Signal Viewer：专注于消费 Signal Hub + SSE 的观测面板。
 const BRIDGE_STORAGE_KEY = 'signal-bridge.snapshot';
-const bridge = new IframeBridge({
+const iframeBridge = new IframeBridge({
   bridgeUrl: 'http://localhost:4175/index.html',
   channelName: 'signal-sync-bridge',
   allowedOrigins: ['http://localhost:4173', 'http://localhost:4174', 'http://localhost:4175'],
@@ -50,6 +50,12 @@ const bridge = new IframeBridge({
   hmacSecret: 'demo-shared-secret',
   storageKey: BRIDGE_STORAGE_KEY,
 });
+// Vite HMR 会重新执行模块顶层代码，这里确保旧实例被销毁，避免重复 clientId 残留在中继页
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    iframeBridge.destroy();
+  });
+}
 const bridgeMessages = ref<string[]>([]);
 let disposeBridge: (() => void) | undefined;
 const { state: latestBridgeSnapshot } = useLocalStorageObserver<BridgeMessage<unknown> | null>(
@@ -95,12 +101,18 @@ const wsEventsText = computed(() =>
   wsEvents.value.length ? wsEvents.value.join('\n') : '等待 WebSocket 消息...'
 );
 
-const requestSync = () => bridge.send('signal-viewer-sync-request', { ts: Date.now() });
+const requestSync = () => iframeBridge.send('signal-viewer-sync-request', { ts: Date.now() });
 
 onMounted(async () => {
   // 初始化中继 iframe，并监听广播消息。
-  await bridge.init();
-  disposeBridge = bridge.onMessage((msg) => {
+  await iframeBridge.init();
+   /**
+   * iframeBridge.onMessage 监听 IframeBridge 统一出口的消息
+   * 这些消息可能来源于 iframe 的 postMessage，也可能来源于 BroadcastChannel
+   * 但不包括所有原始 iframe / BroadcastChannel 消息。
+   * 在这里处理这些消息，方便观察桥接效果。
+   */
+  disposeBridge = iframeBridge.onMessage((msg) => {
     bridgeMessages.value = [`${msg.type}: ${JSON.stringify(msg.payload)}`, ...bridgeMessages.value].slice(0, 10);
   });
   wsClient.connect();
