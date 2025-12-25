@@ -29,6 +29,8 @@
       :polling-enabled="pollingEnabled"
       :sse-events="sseEvents"
       :ws-status="wsStatus"
+      :ws-send-log="wsSendLog"
+      :ws-receive-log="wsReceiveLog"
       v-model:new-ws-message="newWsMessage"
       @toggle-polling="togglePolling"
       @reconnect-sse="reconnectSse"
@@ -85,12 +87,34 @@ const { history: broadcastHistory, post: broadcastPost } = useBroadcastChannel<s
 );
 const newBroadcastAlert = ref('');
 
+const WS_LOG_LIMIT = 6;
+const wsSendLog = ref<string[]>([]);
+const wsReceiveLog = ref<string[]>([]);
+
+const serializeWsPayload = (payload: unknown) => {
+  if (typeof payload === 'string') return payload;
+  if (payload === undefined) return 'undefined';
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+};
+
+const recordWsLog = (target: typeof wsSendLog, direction: 'SEND' | 'RECV', payload: unknown) => {
+  const entry = `${new Date().toISOString()} [${direction}] ${serializeWsPayload(payload)}`;
+  target.value = [entry, ...target.value].slice(0, WS_LOG_LIMIT);
+};
+
 // WebSocket 客户端，模拟需要向后端主动上传的数据链路。
 const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub?client=signal-hub', {
   heartbeatInterval: 8_000,
   reconnectDelay: 3_000,
   logger(message, payload) {
     console.debug('[WS]', message, payload);
+    if (message === 'ws:message') {
+      recordWsLog(wsReceiveLog, 'RECV', payload);
+    }
   },
 });
 const wsStatus = computed(() => wsClient.status.value);
@@ -154,12 +178,18 @@ function emitBroadcast() {
 function sendWs() {
   // 通过 WS 将策略/命令上传后端，再由后端 fan-out。
   if (!newWsMessage.value) return;
-  wsClient.send({
+  const payload = {
     type: 'signal-hub-alert',
     body: newWsMessage.value,
     ts: Date.now(),
-  });
-  newWsMessage.value = '';
+  };
+  try {
+    wsClient.send(payload);
+    recordWsLog(wsSendLog, 'SEND', payload);
+    newWsMessage.value = '';
+  } catch (error) {
+    recordWsLog(wsSendLog, 'SEND', `发送失败: ${(error as Error).message}`);
+  }
 }
 
 function reconnectSse() {

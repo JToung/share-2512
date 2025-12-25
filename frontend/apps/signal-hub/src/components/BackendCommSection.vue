@@ -43,6 +43,16 @@
         </p>
         <textarea v-model="wsMessageModel" placeholder="输入需要推送的策略" />
         <button @click="emit('send-ws')">发送到后端 WebSocket</button>
+        <div class="ws-log-panel">
+          <div class="snapshot-panel">
+            <span class="panel-label">发送日志</span>
+            <pre>{{ wsSendLogText }}</pre>
+          </div>
+          <div class="snapshot-panel">
+            <span class="panel-label">接收日志</span>
+            <pre>{{ wsReceiveLogText }}</pre>
+          </div>
+        </div>
       </article>
     </div>
   </section>
@@ -59,6 +69,8 @@ const props = defineProps<{
   sseEvents: MaybeRef<unknown[]>;
   wsStatus: MaybeRef<string>;
   newWsMessage: string;
+  wsSendLog: MaybeRef<string[]>;
+  wsReceiveLog: MaybeRef<string[]>;
 }>();
 
 const emit = defineEmits<{
@@ -77,6 +89,8 @@ const pollSnapshot = computed(() => unref(props.pollSnapshot));
 const pollingEnabled = computed(() => unref(props.pollingEnabled));
 const sseEvents = computed(() => unref(props.sseEvents));
 const wsStatus = computed(() => unref(props.wsStatus));
+const wsSendLog = computed(() => unref(props.wsSendLog) ?? []);
+const wsReceiveLog = computed(() => unref(props.wsReceiveLog) ?? []);
 const wsStatusTone = computed(() => {
   const status = `${wsStatus.value ?? ''}`.toLowerCase();
   if (status.includes('open')) return 'tone-open';
@@ -85,6 +99,12 @@ const wsStatusTone = computed(() => {
   if (status.includes('closed')) return 'tone-closed';
   return 'tone-idle';
 });
+const wsSendLogText = computed(() =>
+  wsSendLog.value.length ? wsSendLog.value.join('\n') : '暂无记录'
+);
+const wsReceiveLogText = computed(() =>
+  wsReceiveLog.value.length ? wsReceiveLog.value.join('\n') : '暂无记录'
+);
 </script>
 
 <style scoped>
@@ -283,5 +303,15 @@ pre {
 .status-pill.tone-closed,
 .status-pill.tone-idle {
   color: inherit;
+}
+
+.ws-log-panel {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.ws-log-panel pre {
+  min-height: 120px;
 }
 </style>
