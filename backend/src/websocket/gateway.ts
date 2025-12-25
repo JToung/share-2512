@@ -1,11 +1,12 @@
-import type WebSocket from 'ws';
-import { Inject, Logger, OnWSConnection, OnWSDisConnection, OnWSMessage, WSController } from '@midwayjs/core';
-import { ILogger } from '@midwayjs/logger';
-import { MessageService } from '../service/message.service';
+import WebSocket from 'ws';
+import type { IncomingMessage } from 'http';
+import { Inject, OnWSConnection, OnWSMessage, WSController } from '@midwayjs/core';
+import { WsClientRegistry } from '../service/ws-client-registry';
 
 interface BroadcastPayload extends Record<string, unknown> {
   type: string;
   body: unknown;
+  targetApp?: string | string[];
 }
 
 /**
@@ -14,38 +15,45 @@ interface BroadcastPayload extends Record<string, unknown> {
 @WSController('/ws/signal-hub')
 export class WsGateway {
   @Inject()
-  messageService: MessageService;
-
-  @Logger()
-  logger: ILogger;
-
-  /** 记录当前所有在线 socket，便于广播。 */
-  private clients = new Set<WebSocket>();
+  // 全局注册表，用于跨实例共享在线连接
+  clientRegistry: WsClientRegistry;
 
   @OnWSConnection()
-  async onConnection(socket: WebSocket) {
-    this.clients.add(socket);
-    // 握手成功后立即返回欢迎消息，方便前端检测链路状态。
-    socket.send(JSON.stringify({ type: 'welcome', ts: Date.now() }));
-    socket.on('close', () => this.clients.delete(socket));
-    this.logger.info('[ws] client connected');
+  async onConnection(socket: WebSocket, request: IncomingMessage) {
+    // 通过 querystring 中的 client 参数识别来源平台
+    const url = new URL(request.url ?? '', `http://${request.headers.host}`);
+    const appId = url.searchParams.get('client') ?? 'unknown';
+
+    // 新连接建立后放入注册表
+    this.clientRegistry.add(socket, { appId });
+
+    socket.on('close', () => {
+      // 断开时及时清理，避免内存泄漏
+      this.clientRegistry.remove(socket);
+    });
   }
 
   @OnWSMessage('message')
-  async onMessage(socket: WebSocket, payload: BroadcastPayload) {
-    // 每条上行消息都写入 Mongo，随后广播给所有客户端。
-    await this.messageService.recordOutbound(payload.type, payload);
+  async onMessage(data: WebSocket.RawData) {
+    // 所有消息统一解析并转发给广播逻辑
+    const payload = JSON.parse(data.toString());
     this.broadcast({ ...payload, ts: Date.now() });
   }
 
-  @OnWSDisConnection()
-  async onClose(reason: number | string | Buffer) {
-    this.logger.info('[ws] client closed', reason);
-  }
-
   broadcast(payload: BroadcastPayload & { ts?: number }) {
-    // Fan-out 到所有在线客户端，供 Signal Hub / Viewer 同步状态。
-    const message = JSON.stringify(payload);
-    this.clients.forEach((client) => client.send(message));
+    // 扫描所有客户端，筛选出目标 app
+    this.clientRegistry.forEach((client, meta) => {
+      if (
+        payload.targetApp &&
+        ![].concat(payload.targetApp as any).includes(meta.appId)
+      ) {
+        return;
+      }
+      if (client.readyState === WebSocket.OPEN && payload.type !== 'heartbeat') {
+        // 非心跳消息直接推送
+        console.log('broadcast', meta);
+        client.send(JSON.stringify(payload));
+      }
+    });
   }
 }

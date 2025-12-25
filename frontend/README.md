@@ -43,13 +43,14 @@ frontend/
 # 前端
 cd frontend
 pnpm install
-pnpm run dev:signal-hub   # http://localhost:4173
-pnpm run dev:signal-viewer   # http://localhost:4174
-pnpm run dev:comms    # http://localhost:4175
+pnpm dev:signal-hub   # http://localhost:4173
+pnpm dev:signal-viewer   # http://localhost:4174
+pnpm dev:comms    # http://localhost:4175
 
-# 后端（在 backend/ 下）
+# 后端
+cd backend
 pnpm install
-pnpm run dev          # MidwayJS + MongoDB，默认端口 7001
+pnpm dev          # MidwayJS + MongoDB，默认端口 7001
 ```
 
 > 提示：三个 Vite 应用共用 `packages/*`，如需生产构建可执行 `pnpm run build:signal-hub|signal-viewer|comms`；若要一次性检查类型，使用 `pnpm run typecheck`。

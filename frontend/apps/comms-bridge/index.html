@@ -4,9 +4,39 @@
     <meta charset="UTF-8" />
     <title>comms.xxx.com 中继页</title>
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'" />
+    <style>
+      :root {
+        font-family: 'SF Pro', 'Microsoft Yahei', sans-serif;
+        background: #020617;
+        color: #e2e8f0;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+      .card {
+        max-width: 780px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(226, 232, 240, 0.1);
+        border-radius: 18px;
+        padding: 28px;
+        box-shadow: 0 25px 65px rgba(2, 6, 23, 0.8);
+        line-height: 1.6;
+      }
+      .card strong {
+        color: #38bdf8;
+      }
+    </style>
   </head>
   <body>
     <script type="module" src="./src/main.ts"></script>
-    <p>公共中继页负责接收来自 signal-hub.xxx.com / signal-viewer.xxx.com 的消息，完成 HMAC 校验和二次广播。</p>
+    <div class="card">
+      <strong>本地 comms 中继页</strong> 正在运行，负责接收来自 Signal Hub / Signal Viewer 的消息，完成 HMAC 校验、
+      timestamp/nonce 校验，并通过 BroadcastChannel 进行二次广播。此页面无需交互，可放心保持在后台。
+    </div>
   </body>
 </html>

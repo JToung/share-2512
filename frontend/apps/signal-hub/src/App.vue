@@ -1,80 +1,54 @@
 <template>
   <div class="page">
     <header>
-      <h1>Signal Hub（signal-hub.xxx.com）前端通讯演示</h1>
+      <h1>Signal Hub 前端通讯演示</h1>
       <p>
         同域优先使用浏览器原生能力，跨域通过公共中继页隔离，实时通讯在 WebSocket/SSE 之上叠加本地桥接，确保网络抖动下仍能保持多端一致。
       </p>
       <p class="hint">最近一次网络抖动补偿耗时：{{ lastGap }} ms</p>
     </header>
 
-    <section>
-      <h2>浏览器本地通讯：localStorage + BroadcastChannel</h2>
-      <div class="grid">
-        <article>
-          <h3>localStorage 同步</h3>
-          <textarea v-model="newLocalAlert" placeholder="输入示例消息..." />
-          <button @click="pushLocal">localStorage 写入 + storage 事件</button>
-          <pre>{{ localCache.state }}</pre>
-        </article>
-        <article>
-          <h3>BroadcastChannel</h3>
-          <textarea v-model="newBroadcastAlert" placeholder="广播事件..." />
-          <button @click="emitBroadcast">channel.postMessage</button>
-          <pre>{{ broadcastHistory }}</pre>
-        </article>
-      </div>
-    </section>
+    <LocalCommSection
+      v-model:local-alert="newLocalAlert"
+      v-model:broadcast-alert="newBroadcastAlert"
+      :local-cache="localCache.state"
+      :broadcast-history="broadcastHistory"
+      @push-local="pushLocal"
+      @emit-broadcast="emitBroadcast"
+    />
 
-    <section>
-      <h2>跨域 iframes 通讯：postMessage + 公共中继页</h2>
-      <p>
-        iframeBridge 负责 origin 白名单、targetOrigin、sandbox、HMAC、timestamp/nonce 防重放，并将 iframe 广播到 BroadcastChannel，供其他标签页二次消费。
-      </p>
-      <button @click="replayIframe">向 comms.xxx.com 派发数据</button>
-      <button @click="broadcastViaBridge">将最新 SSE 消息写入桥</button>
-      <pre>{{ bridgeLog }}</pre>
-    </section>
+    <IframeBridgeSection
+      :bridge-log="bridgeLog"
+      :storage-snapshot="latestBridgeSnapshot"
+      @replay="replayIframe"
+      @broadcast="broadcastViaBridge"
+    />
 
-    <section>
-      <h2>前后端通讯对比</h2>
-      <div class="grid">
-        <article>
-          <h3>HTTP 轮询</h3>
-          <p>简单可控，但会占用带宽。</p>
-          <pre>{{ pollSnapshot }}</pre>
-        </article>
-        <article>
-          <h3>SSE（推荐用于跨平台接收）</h3>
-          <p>后端：/api/sse/stream</p>
-          <pre>{{ sseEvents }}</pre>
-          <button @click="reconnectSse">重新建立 SSE</button>
-        </article>
-        <article>
-          <h3>WebSocket（跨平台发送）</h3>
-          <p>状态：{{ wsStatus }}</p>
-          <textarea v-model="newWsMessage" placeholder="输入需要推送的策略" />
-          <button @click="sendWs">发送到后端 WebSocket</button>
-        </article>
-      </div>
-    </section>
+    <BackendCommSection
+      :poll-snapshot="pollSnapshot"
+      :polling-enabled="pollingEnabled"
+      :sse-events="sseEvents"
+      :ws-status="wsStatus"
+      v-model:new-ws-message="newWsMessage"
+      @toggle-polling="togglePolling"
+      @reconnect-sse="reconnectSse"
+      @send-ws="sendWs"
+    />
 
-    <section>
-      <h2>混合增强：SSE/WebSocket + iframe 通讯桥</h2>
-      <p>
-        SSE 消息到达即通过 iframeBridge + BroadcastChannel 写入本地，若 SSE 断开则 fallback 至 HTTP 轮询，保持所有终端面板一致。
-      </p>
-      <pre>{{ mixedFlowLog }}</pre>
-    </section>
+    <MixedFlowSection :mixed-flow-log="mixedFlowLog" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { httpPoll, useBroadcastChannel, useLocalStorageSync } from '@packages/local-comm';
+import { httpPoll, useBroadcastChannel, useLocalStorageObserver, useLocalStorageSync } from '@packages/local-comm';
 import { createWsClient } from '@packages/ws-client';
-import { IframeBridge } from '@packages/bridge-sdk';
+import { BRIDGE_SNAPSHOT_EVENT, IframeBridge, type BridgeMessage } from '@packages/bridge-sdk';
 import { useMessageStore } from './stores/messageStore';
+import BackendCommSection from './components/BackendCommSection.vue';
+import IframeBridgeSection from './components/IframeBridgeSection.vue';
+import LocalCommSection from './components/LocalCommSection.vue';
+import MixedFlowSection from './components/MixedFlowSection.vue';
 
 // Signal Hub 页面：串联本地缓存、跨域桥、SSE、WebSocket、HTTP Poll 的示例状态。
 const messageStore = useMessageStore();
@@ -112,7 +86,7 @@ const { history: broadcastHistory, post: broadcastPost } = useBroadcastChannel<s
 const newBroadcastAlert = ref('');
 
 // WebSocket 客户端，模拟需要向后端主动上传的数据链路。
-const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub', {
+const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub?client=signal-hub', {
   heartbeatInterval: 8_000,
   reconnectDelay: 3_000,
   logger(message, payload) {
@@ -127,17 +101,29 @@ let eventSource: EventSource | null = null;
 let lastSseTs = Date.now();
 
 const pollSnapshot = ref<string[]>([]);
+const pollingEnabled = ref(false);
 let pollTimer: number | null = null;
 
+const BRIDGE_STORAGE_KEY = 'signal-bridge.snapshot';
+
 const iframeBridge = new IframeBridge({
-  bridgeUrl: 'https://comms.xxx.com/index.html',
+  bridgeUrl: 'http://localhost:4175/index.html',
   channelName: 'signal-sync-bridge',
-  allowedOrigins: ['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com', 'https://comms.xxx.com'],
-  targetOrigin: 'https://comms.xxx.com',
+  allowedOrigins: ['http://localhost:4173', 'http://localhost:4174', 'http://localhost:4175'],
+  targetOrigin: 'http://localhost:4175',
   hmacSecret: 'demo-shared-secret',
+  storageKey: BRIDGE_STORAGE_KEY,
 });
 const bridgeLog = ref<string[]>([]);
 let disposeBridge: (() => void) | undefined;
+const { state: latestBridgeSnapshot } = useLocalStorageObserver<BridgeMessage<unknown> | null>(
+  BRIDGE_STORAGE_KEY,
+  null,
+  {
+    deserializer: (raw) => (raw ? (JSON.parse(raw) as BridgeMessage<unknown>) : null),
+    customEvent: BRIDGE_SNAPSHOT_EVENT,
+  }
+);
 
 const mixedFlowLog = ref<string[]>([]);
 
@@ -173,17 +159,25 @@ function reconnectSse() {
   startSse();
 }
 
-function replayIframe() {
+// 手动触发 iframe 桥发送消息，模拟用户操作。
+function replayIframe(message: string) {
   console.log('Replay iframe bridge...');
   iframeBridge.send('signal-hub-alert', {
-    body: `Manual replay ${Date.now()}`,
+    body: message,
+  }, (message) => {
+    console.log('Iframe bridge sent:', message);
+    bridgeLog.value = [`${new Date().toISOString()} ${message.type}`, ...bridgeLog.value].slice(0, 6);
   });
 }
 
+// 通过 iframe 桥将事件广播给所有标签页。
 function broadcastViaBridge() {
   const latest = sseEvents.value[0];
   if (!latest) return;
-  iframeBridge.send('sse-mirror', { body: latest });
+  iframeBridge.send('sse-mirror', { body: latest }, (message) => {
+    console.log('Iframe bridge sent:', message);
+    bridgeLog.value = [`${new Date().toISOString()} ${message.type}`, ...bridgeLog.value].slice(0, 6);
+  });
 }
 
 function recordMixedFlow(step: string) {
@@ -193,7 +187,9 @@ function recordMixedFlow(step: string) {
 const startSse = () => {
   // Signal Hub 作为“官方来源”，通过 SSE 接收后端消息。
   recordMixedFlow('SSE connecting...');
-  eventSource = new EventSource('http://localhost:7001/api/sse/stream');
+  eventSource = new EventSource('http://localhost:7001/api/sse/stream', {
+    withCredentials: true,
+  });
   eventSource.onmessage = (event) => {
     lastSseTs = Date.now();
     const payload = `SSE >> ${event.data}`;
@@ -222,6 +218,7 @@ const teardownSse = () => {
 
 const startPolling = () => {
   // HTTP Poll 在 SSE 断线时兜底，周期性抓取最近消息。
+  if (pollTimer) return;
   pollTimer = window.setInterval(async () => {
     try {
       const messages = await httpPoll<string[]>('http://localhost:7001/api/sse/messages?limit=3');
@@ -239,10 +236,19 @@ const stopPolling = () => {
   }
 };
 
+const togglePolling = () => {
+  if (pollingEnabled.value) {
+    pollingEnabled.value = false;
+    stopPolling();
+    return;
+  }
+  pollingEnabled.value = true;
+  startPolling();
+};
+
 onMounted(async () => {
   wsClient.connect();
   startSse();
-  startPolling();
   await iframeBridge.init();
   disposeBridge = iframeBridge.onMessage((message) => {
     bridgeLog.value = [`${message.type}: ${JSON.stringify(message.payload)}`, ...bridgeLog.value].slice(0, 8);
@@ -265,49 +271,148 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+:global(:root) {
+  --sh-bg: #edf2ff;
+  --sh-card: #ffffff;
+  --sh-border: #d8e1ff;
+  --sh-text: #0f172a;
+  --sh-muted: #64748b;
+  --sh-primary: #2563eb;
+  --sh-primary-dark: #1d4ed8;
+  --sh-shadow: 0 10px 25px rgba(15, 23, 42, 0.1);
+  --sh-radius: 14px;
+}
+
+:global(body) {
+  margin: 0;
+  background: radial-gradient(circle at top, rgba(37, 99, 235, 0.08), transparent 45%), var(--sh-bg);
+  min-height: 100vh;
+  font-family: 'SF Pro', 'Microsoft Yahei', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--sh-text);
+}
+
+:global(button) {
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 10px 18px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--sh-primary), var(--sh-primary-dark));
+  color: #fff;
+  transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+:global(button:hover) {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+}
+
+:global(textarea) {
+  width: calc(100% - 32px);
+  border-radius: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(248, 250, 252, 0.9);
+  min-height: 110px;
+  font-size: 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+  z-index: 1;
+}
+
+:global(textarea:focus) {
+  outline: none;
+  border-color: var(--sh-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
 .page {
-  padding: 24px;
-  font-family: 'SF Pro', 'Microsoft Yahei', sans-serif;
-  color: #0f172a;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
 }
+
 header {
-  border-bottom: 1px solid #e2e8f0;
-  margin-bottom: 24px;
+  background: var(--sh-card);
+  border-radius: var(--sh-radius);
+  padding: 24px;
+  box-shadow: var(--sh-shadow);
+  margin-bottom: 32px;
+  border: 1px solid var(--sh-border);
 }
+
+header h1 {
+  margin: 0 0 12px;
+  font-size: 28px;
+}
+
+header p {
+  margin: 6px 0;
+  color: var(--sh-muted);
+  line-height: 1.5;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
 }
+
 section {
   margin-bottom: 32px;
+  background: var(--sh-card);
+  border-radius: var(--sh-radius);
+  padding: 20px;
+  border: 1px solid var(--sh-border);
+  box-shadow: var(--sh-shadow);
 }
-article, textarea, pre {
-  border: 1px solid #cbd5f5;
-  border-radius: 8px;
+
+section h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+article,
+textarea,
+pre {
+  border: 1px solid var(--sh-border);
+  border-radius: 10px;
   padding: 12px;
   background: #f8fafc;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
 }
+
+article h3 {
+  margin-top: 0;
+}
+
 textarea {
-  min-height: 90px;
+  min-height: 96px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 14px;
 }
+
 pre {
-  max-height: 180px;
+  max-height: 200px;
   overflow: auto;
+  font-size: 13px;
+  background: #0f172a;
+  color: #e2e8f0;
 }
-button {
-  margin-top: 8px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  cursor: pointer;
-}
-button + button {
-  margin-left: 8px;
-}
+
 .hint {
   color: #059669;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 24px 16px;
+  }
+
+  section {
+    padding: 18px;
+  }
 }
 </style>

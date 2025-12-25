@@ -51,6 +51,7 @@ export function useBroadcastChannel<T>(
   };
 
   const handler = (event: MessageEvent<BroadcastEnvelope<T>>) => {
+    console.log('收到：', event.data)
     pushHistory(event.data);
     onMessage?.(event.data.payload, { envelope: event.data, rawEvent: event });
   };
@@ -124,4 +125,69 @@ export async function httpPoll<T>(input: RequestInfo, init?: RequestInit): Promi
     throw new Error(`Polling failed with status ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+export interface LocalStorageBroadcastDetail<T> {
+  key: string;
+  value: T;
+}
+
+export interface LocalStorageObserverOptions<T> {
+  deserializer?: (raw: string | null) => T;
+  customEvent?: string;
+}
+
+/** 侦听指定 localStorage key 的变化（含 storage 事件与可选自定义事件，用于本页写入）。 */
+export function useLocalStorageObserver<T>(
+  key: string,
+  initialValue: T,
+  options: LocalStorageObserverOptions<T> = {}
+) {
+  const { deserializer = (raw: string | null) => (raw ? (JSON.parse(raw) as T) : initialValue), customEvent } = options;
+
+  const state = ref<T>(initialValue);
+
+  const read = () => {
+    try {
+      state.value = deserializer(localStorage.getItem(key));
+    } catch (error) {
+      console.warn('[useLocalStorageObserver] Failed to parse localStorage value:', error);
+      state.value = initialValue;
+    }
+    return state.value;
+  };
+
+  read();
+
+  const storageHandler = (event: StorageEvent) => {
+    if (event.storageArea !== localStorage || event.key !== key) {
+      return;
+    }
+    read();
+  };
+  window.addEventListener('storage', storageHandler);
+
+  let customHandler: ((event: Event) => void) | undefined;
+  if (customEvent) {
+    customHandler = (event: Event) => {
+      const detail = (event as CustomEvent<LocalStorageBroadcastDetail<T>>).detail;
+      if (!detail || detail.key !== key) {
+        return;
+      }
+      state.value = detail.value;
+    };
+    window.addEventListener(customEvent, customHandler as EventListener);
+  }
+
+  onBeforeUnmount(() => {
+    window.removeEventListener('storage', storageHandler);
+    if (customEvent && customHandler) {
+      window.removeEventListener(customEvent, customHandler as EventListener);
+    }
+  });
+
+  return {
+    state,
+    refresh: read,
+  };
 }
