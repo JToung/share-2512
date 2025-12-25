@@ -1,108 +1,111 @@
-# 前端通讯方案说明
+# frontend：浏览器端通讯演示
 
-> 主题：同域优先浏览器原生能力 + 跨域公共中继页 + WebSocket/SSE 增强
+`frontend/` 目录承载整套 Vite 应用与复用包，聚焦“同域 → 跨域 → 前后端”逐级增强的通讯策略。所有示例都可在不修改后端的情况下独立启动，方便演讲或调试。
+
+## 目录结构
 
 ```
 frontend/
 ├─ apps/
-│  ├─ signal-hub/      # Signal Hub（跨端通讯中枢）应用，演示全部通讯策略
-│  ├─ signal-viewer/   # Signal Viewer（多端观测面板）消费，演示桥接回放
-│  └─ comms-bridge/    # comms.xxx.com 中继页，实现 postMessage + BroadcastChannel
-└─ packages/
-   ├─ bridge-sdk/      # IframeBridge 安全 & 生命周期封装
-   ├─ local-comm/      # localStorage + BroadcastChannel 组合
-   └─ ws-client/       # 带心跳的 WebSocket 客户端
+│  ├─ signal-hub/      # Signal Hub：全量生产端，串联所有通道
+│  ├─ signal-viewer/   # Signal Viewer：消费端 / 大屏，用于观测链路质量
+│  └─ comms-bridge/    # comms.xxx.com 公共中继页，postMessage → BroadcastChannel
+├─ packages/
+│  ├─ bridge-sdk/      # IframeBridge 封装（握手、HMAC、防重放、快照）
+│  ├─ local-comm/      # localStorage / BroadcastChannel / HTTP Poll 组合式 API
+│  └─ ws-client/       # Vue 友好的 WebSocket 客户端（心跳 + 自动重连）
+├─ package.json        # 工作空间入口
+└─ pnpm-lock.yaml
 ```
 
-## 核心示例
+## 应用角色
 
-| 场景 | 文件 | 说明 |
+| 应用 | 端口（默认） | 作用 | 关键文件 |
+| --- | --- | --- | --- |
+| `apps/signal-hub` | `4173` | 生产端：收集用户输入、消费后端 SSE/WS，并通过 iframeBridge 广播给其他页面 | `src/App.vue`、`components/*`、`stores/messageStore.ts` |
+| `apps/signal-viewer` | `4174` | 观测端：同时监听 iframeBridge、SSE、WebSocket、BroadcastChannel，以验证一致性 | `src/App.vue` |
+| `apps/comms-bridge` | `4175` | 独立域的中继页：负责握手、HMAC 校验、BroadcastChannel fan-out，是跨域通信唯一入口 | `src/main.ts` |
+
+## 通用 Packages
+
+| 包 | 功能 | 常用导出 |
 | --- | --- | --- |
-| localStorage / storage | `apps/signal-hub/src/App.vue` | `useLocalStorageSync` 自动写入 + storage 事件回流 |
-| BroadcastChannel | `packages/local-comm/src/index.ts` | `useBroadcastChannel` 提供 history + onMessage |
-| IframeBridge | `packages/bridge-sdk/src/index.ts` | origin 白名单、targetOrigin、HMAC、防重放、beforeunload 清理 |
-| 公共中继页 | `apps/comms-bridge/src/main.ts` | 中继页验证签名，二次广播到 BroadcastChannel |
-| SSE | `apps/signal-hub/src/App.vue` & `apps/signal-viewer/src/App.vue` | EventSource 监听 + fallback 到 HTTP Poll |
-| WebSocket | `packages/ws-client/src/index.ts` | 心跳、自动重连、send 包装 |
-| 混合增强 | `apps/signal-hub/src/App.vue` | SSE 到达 -> iframeBridge -> BroadcastChannel -> Signal Viewer |
+| `packages/local-comm` | 封装浏览器原生 API，构建“本地总线” | `useLocalStorageSync`、`useLocalStorageObserver`、`useBroadcastChannel`、`httpPoll` |
+| `packages/bridge-sdk` | 将 iframe + BroadcastChannel + HMAC 组合为可复用的 `IframeBridge` | `IframeBridge`、`BRIDGE_SNAPSHOT_EVENT`、`BridgeMessage` |
+| `packages/ws-client` | 统一管理 WebSocket 状态、心跳与重连 | `createWsClient` |
 
-## Pinia + 业务示例
-
-`apps/signal-hub/src/stores/messageStore.ts` 维护统一消息流，`App.vue` 中对 all channels 的消息统一落盘并在网络抖动时记录 `lastNetworkGapMs`。
-
-## 运行思路
-
-1. 将 comms-bridge 部署为独立域（`comms.xxx.com`），并在宿主页面以 sandbox iframe 懒加载。
-2. Signal Hub SSE 获取后端推送，再通过 `IframeBridge` + `BroadcastChannel` 广播给 Signal Viewer。
-3. Signal Viewer 监听桥接消息，同时独立消费 SSE 以验证桥接质量。
-4. 当 SSE 断开后，Signal Hub 自动退化到 `httpPoll`，并继续通过 iframe 通知 Signal Viewer。
-
-## 项目运行
+## 开发命令
 
 ```bash
-# 前端
-cd frontend
-pnpm install
-pnpm dev:signal-hub   # http://localhost:4173
-pnpm dev:signal-viewer   # http://localhost:4174
-pnpm dev:comms    # http://localhost:4175
+pnpm install                 # 根目录执行一次即可
+pnpm dev:signal-hub          # http://localhost:4173
+pnpm dev:signal-viewer       # http://localhost:4174
+pnpm dev:comms               # http://localhost:4175
 
-# 后端
-cd backend
-pnpm install
-pnpm dev          # MidwayJS + MongoDB，默认端口 7001
+pnpm build:signal-hub        # 产物输出到 apps/signal-hub/dist
+pnpm build:signal-viewer
+pnpm build:comms
+
+pnpm typecheck               # 一次性跑 tsc
 ```
 
-> 提示：三个 Vite 应用共用 `packages/*`，如需生产构建可执行 `pnpm run build:signal-hub|signal-viewer|comms`；若要一次性检查类型，使用 `pnpm run typecheck`。
+> 三个应用共享 `packages/*`，若对包代码做改动，只需在任一应用中重新启动 dev server 或手动触发 HMR 即可。
 
-## 关键代码片段
+## 关键通信流程
+
+1. **本地缓存同步**（`apps/signal-hub/src/components/LocalCommSection.vue`）  
+   - `useLocalStorageSync` 写入后触发 `storage` 事件。  
+   - `useBroadcastChannel` 低延迟广播同域标签页。
+2. **跨域公共中继**（`apps/comms-bridge/src/main.ts` + `packages/bridge-sdk/`）  
+   - Client 首先发送 `bridge:hello`，中继页校验 origin 并登记 `ClientInfo`。  
+   - 所有业务消息强制执行 `timestamp + nonce + HMAC` 校验，通过唯一的 BroadcastChannel fan-out。  
+   - `IframeBridge` 自动懒加载 sandbox iframe，双写 postMessage + BroadcastChannel。
+3. **后端实时通道**（`apps/signal-hub/src/components/BackendCommSection.vue`）  
+   - SSE：`EventSource('http://localhost:7001/api/sse/stream')`，断线后记录 `lastNetworkGapMs` 并 fallback 到 `httpPoll`。  
+   - WebSocket：`createWsClient('ws://localhost:7001/ws/signal-hub?client=xxx')`，自带心跳与自动重连。
+4. **混合增强链路**（`apps/signal-hub/src/components/MixedFlowSection.vue`）  
+   - SSE 到达 → iframeBridge 广播 → BroadcastChannel 写入 Signal Viewer → Viewer 再次与后端 SSE 对比，形成多路径回放。
+
+## 代表性代码
 
 ```ts
-// localStorage + storage 事件双向同步
-const cache = useLocalStorageSync('signal-hub.local.alerts', [], {
-  onRemoteUpdate(value) {
-    console.info('storage updated', value);
-  },
-});
+// apps/signal-hub/src/App.vue
+const localCache = useLocalStorageSync('signal-hub.local.alerts', [], { onRemoteUpdate: notifyLocal })
+const { history, post } = useBroadcastChannel('signal-sync-alerts', 'signal-hub', { onMessage: notifyBroadcast })
 
-// BroadcastChannel reactive 封装
-const { history, post } = useBroadcastChannel('signal-sync-alerts', 'signal-hub', {
-  onMessage(payload) {
-    console.log('channel payload', payload);
-  },
-});
-
-// iframeBridge 懒加载 + HMAC 校验
-const bridge = new IframeBridge({
-  bridgeUrl: 'https://comms.xxx.com/index.html',
+const iframeBridge = new IframeBridge({
+  bridgeUrl: 'http://localhost:4175/index.html',
   channelName: 'signal-sync-bridge',
-  allowedOrigins: ['https://signal-hub.xxx.com', 'https://signal-viewer.xxx.com', 'https://comms.xxx.com'],
-  targetOrigin: 'https://comms.xxx.com',
+  allowedOrigins: ['http://localhost:4173', 'http://localhost:4174', 'http://localhost:4175'],
+  targetOrigin: 'http://localhost:4175',
   hmacSecret: 'demo-shared-secret',
-});
-await bridge.init();
-bridge.onMessage((message) => console.log('bridge', message));
-
-// WebSocket 自动重连 + 心跳
-const client = createWsClient('ws://localhost:7001/ws/signal-hub', {
-  reconnectDelay: 3_000,
-  heartbeatInterval: 8_000,
-});
-client.connect();
+  storageKey: 'signal-bridge.snapshot',
+})
+await iframeBridge.init()
+iframeBridge.onMessage((message) => messageStore.pushMessage({...}))
 ```
 
-## 何时采用哪种方案
+```ts
+// packages/ws-client/src/index.ts
+const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub?client=signal-viewer', {
+  heartbeatInterval: 8_000,
+  reconnectDelay: 3_000,
+})
+wsClient.connect()
+```
 
-| 目标 | 推荐方案 | 备注 |
-| --- | --- | --- |
-| 同域标签页同步 | localStorage + `storage` 事件 / BroadcastChannel | 纯浏览器能力，零依赖 |
-| 跨域 / 跨平台消费后端消息 | SSE + 公共中继页 | SSE 天生单向 push，断线可自动恢复 |
-| 向后端实时写入 | WebSocket | 我们的 `ws-client` 自带心跳与重连 |
-| 网络抖动 + 多域同步 | SSE/WebSocket + 公共 iframe + BroadcastChannel | 中继页可缓存 + 本地回放，避免后端重复推送 |
+## 联调建议
 
-## 学习要点
+1. 先启动 `pnpm dev`（后端目录）或使用远程服务，保证 `http://localhost:7001` 可访问。  
+2. 启动 `signal-hub` 与 `comms-bridge`，触发 SSE 测试接口（`GET /api/sse/broadcast/test`）观察界面更新。  
+3. 再启动 `signal-viewer`，确认它能同步 iframe 消息、本地快照、SSE 与 WebSocket 事件。  
+4. 切换网络或手动停止 SSE 服务，查看 `MixedFlow` 面板中的回退与补偿路径。
 
-- 原生 API 足以支撑大部分同域需求。
-- 跨域通讯应该通过最小化暴露面的公共中继页（`comms.xxx.com`）实现安全隔离。
-- 实时方案必须考虑断网后的补偿：HTTP Poll + iframe 二次广播。
-- 所有消息使用统一结构：`{ id, type, payload, timestamp, nonce, signature }`。
+## FAQ
+
+- **为什么 BroadcastChannel 只能在中继页使用？**  
+  为避免 `a → b → c` 回流风暴，只有 `comms-bridge` 可以访问 BroadcastChannel，其余客户端必须通过 `IframeBridge` 上行。
+- **是否可以替换 HMAC？**  
+  Demo 直接使用 `demo-shared-secret`，生产环境应由后端签发并通过安全配置注入，同时可以接入更严格的密钥轮换策略。
+- **如何部署？**  
+  `signal-hub` 与 `signal-viewer` 可落在各自业务域；`comms-bridge` 建议使用独立二级域（如 `comms.xxx.com`），iframe 以 `sandbox="allow-scripts allow-same-origin"` 懒加载。
