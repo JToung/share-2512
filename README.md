@@ -1,16 +1,14 @@
-# 前端通讯方案对比与增强案例（前端演示简略版）
+# 前端通讯方案对比与增强案例
 
 面向前端 / 全栈分享的演示仓库：以 **Vue 3 + TypeScript + Pinia** 前端与 **MidwayJS + MongoDB** 后端为基础，完整实现浏览器本地通讯、跨域 iframe 中继页、SSE / WebSocket 实时链路与网络抖动下的混合补偿策略。
 
-当前的前端界面只保留三个操作面板（本地缓存、iframe 桥、WebSocket 控制台），聚焦“同域 → 跨域 → 前后端”三条链路，方便在分享时快速演示关键流程。
-
 ## 仓库亮点
 
-- **Signal Hub 工作台**：单页串联 localStorage + BroadcastChannel、IframeBridge 与 WebSocket 控制台，操作按钮直接对应示例代码，方便观察日志回放。
-- **Signal Viewer 观测面板**：精简为 iframe + WebSocket 两块区域，突出跨域消息订阅与 WebSocket 状态监控。
+- **三款 Vite 应用**（Signal Hub、Signal Viewer、Comms Bridge）分别承担通信源、观测面板与跨域桥梁三种角色，可单独部署。
 - **IframeBridge + BroadcastChannel 双通道**：桥页只对已握手的白名单 origin 开放，所有消息强制执行 timestamp + nonce + HMAC 验证，杜绝回环与伪造。
-- **localStorage + BroadcastChannel 组合 Hook**：`useLocalStorageSync / useLocalStorageObserver / useBroadcastChannel / httpPoll` 等封装直接复用，演示同域“本地总线”。
-- **MidwayJS 实时后台**：`SSE + HTTP Poll + WebSocket` 统一落在 `MessageService`，所有消息入库后可回放/审计（前端当前默认只展示 WebSocket，SSE 可按需重新接入）。
+- **localStorage + BroadcastChannel 组合 Hook**：`useLocalStorageSync / useLocalStorageObserver / useBroadcastChannel / httpPoll` 等封装直接复用。
+- **MidwayJS 实时后台**：`SSE + HTTP Poll + WebSocket` 统一落在 `MessageService`，所有消息入库后可回放/审计。
+- **网络抖动增强**：SSE 断链时自动退化到 HTTP Poll，再通过 iframeBridge + BroadcastChannel 把最新快照回灌给多端页面。
 
 ## 目录结构
 
@@ -60,17 +58,9 @@ pnpm dev   # 默认监听 7001
 
 | 模块 | 定位 | 关键点 |
 | --- | --- | --- |
-| `apps/signal-hub` | 通讯中枢 / 演示控制台 | 页面划分为三个区域：浏览器本地通道（localStorage + BroadcastChannel）、跨域 iframes 通讯（IframeBridge + snapshot）、前后端对比（WebSocket 发送 / 接收日志）。 |
-| `apps/signal-viewer` | 消费端 / 观测面板 | 通过 iframeBridge 接入 `comms.xxx.com`，同时监听 WebSocket 下行，突出跨域回放与在线状态观测。 |
+| `apps/signal-hub` | 通讯中枢 / 生产者 | 同时演示 localStorage、BroadcastChannel、IframeBridge、SSE、WebSocket、HTTP Poll，`MixedFlowSection` 记录补偿链路。 |
+| `apps/signal-viewer` | 消费端 / 大屏 | 通过 iframeBridge 接入 `comms.xxx.com`，并直接消费 SSE + WebSocket + BroadcastChannel，验证多源一致性。 |
 | `apps/comms-bridge` | 独立域中继页 | 唯一拥有 BroadcastChannel 的页面：握手前置、origin 白名单、HMAC 校验、nonce 防重放、`clients` 生命周期管理。 |
-
-## 前端演示要点
-
-- **LocalCommSection**（`frontend/apps/signal-hub/src/components/LocalCommSection.vue`）展示 localStorage storage 事件与 BroadcastChannel 的互补：一边写入缓存，一边查看历史广播。
-- **IframeBridgeSection**（`frontend/apps/signal-hub/src/components/IframeBridgeSection.vue`）可以手动将输入内容发送到中继页，同时查看桥日志与 localStorage 快照，验证 origin 校验、HMAC 与双写策略。
-- **BackendCommSection**（`frontend/apps/signal-hub/src/components/BackendCommSection.vue`）以 WebSocket 控制台为核心，实时展示发送 / 接收日志，突出跨平台指令链路。
-- **Signal Viewer**（`frontend/apps/signal-viewer/src/App.vue`）只保留 iframeBridge 消息列表与 WebSocket 状态两块区域，方便在演示中对照 Signal Hub 操作。
-- **SSE + HTTP Poll** 相关代码仍保留在 `packages/local-comm` 与后端控制器中，如需扩展演示可直接解注 `startSse()` 或引入补偿面板。
 
 ## 通用 Packages
 
@@ -113,10 +103,11 @@ pnpm dev   # 默认监听 7001
 
 ## 通信链路要点
 
-- Signal Hub 在同域场景下优先使用 `useLocalStorageSync` + `useBroadcastChannel` 构建“本地总线”，任何输入都能马上在多标签页复现。
-- 需要跨域时由 `IframeBridge` 将消息发往 `apps/comms-bridge`，再由中继页广播给所有 listener；只有中继页能直接触碰 BroadcastChannel，保证拓扑可控。
-- WebSocket 控制台用于展示上行指令与下行事件，既可模拟业务策略推送，也能观察重连/心跳日志；Signal Viewer 同步监听该通道。
-- 后端的 SSE / HTTP Poll / WebSocket 仍共享一套 `MessageService`，即便前端演示暂未显示 SSE，依然可以调用 API 注入消息或扩展 UI。
+- Signal Hub 通过 SSE 获取后端推送，一旦收到就立刻调用 `IframeBridge.send()`，中继页再 fan-out 到 BroadcastChannel，确保本地所有标签页同步。
+- SSE 断线由 `messageStore.trackNetworkGap()` 记录时间差，并打开 `httpPoll` 兜底；轮询得到的快照仍会通过 iframeBridge 广播。
+- WebSocket 负责前端 → 后端的主动指令，上行同时写入 MongoDB，方便审计。
+- Signal Viewer 同时监听 iframeBridge、SSE、BroadcastChannel、localStorage snapshot，对比不同路径的延迟与可用性。
+- 中继页是唯一的 BroadcastChannel 使用者，Client 永远无法直接广播，彻底消除 a→b→c 级联。
 
 ## 推荐策略对照表
 
