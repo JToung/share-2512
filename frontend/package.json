@@ -7,6 +7,7 @@
     "dev:signal-hub": "vite --config apps/signal-hub/vite.config.ts",
     "dev:signal-viewer": "vite --config apps/signal-viewer/vite.config.ts",
     "dev:comms": "vite --config apps/comms-bridge/vite.config.ts",
+    "dev:all": "bash ./scripts/dev-all.sh",
     "build:signal-hub": "vite build --config apps/signal-hub/vite.config.ts",
     "build:signal-viewer": "vite build --config apps/signal-viewer/vite.config.ts",
     "build:comms": "vite build --config apps/comms-bridge/vite.config.ts",

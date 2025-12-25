@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
 import path from 'path';
 
 const appRoot = __dirname;
@@ -12,6 +13,7 @@ const packageAliases = ['local-comm', 'ws-client', 'bridge-sdk'].reduce<Record<s
 
 export default defineConfig({
   root: appRoot,
+  plugins: [vue()],
   server: {
     port: 4175,
     fs: {
