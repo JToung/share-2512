@@ -5,6 +5,7 @@
 
     <section>
       <h2>IframeBridge 消息</h2>
+      <button @click="requestSync">向中继页请求最新快照</button>
       <pre>{{ bridgeMessages }}</pre>
     </section>
     <section>
@@ -15,12 +16,28 @@
       </p>
       <pre>{{ wsEventsText }}</pre>
     </section>
+    <section>
+      <h2>localStorage 快照（自动刷新）</h2>
+      <p class="section-note">任一标签页触发 iframeBridge 消息后，这里会通过 storage 事件同步最新数据。</p>
+      <pre>{{ storageSnapshotText }}</pre>
+    </section>
+
+    <section>
+      <h2>BroadcastChannel 二次同步</h2>
+      <pre>{{ channelHistory }}</pre>
+    </section>
+
+    <section>
+      <h2>SSE（被动接收）</h2>
+      <pre>{{ sseMirror }}</pre>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { IframeBridge } from '@packages/bridge-sdk';
+import { useBroadcastChannel, useLocalStorageObserver } from '@packages/local-comm';
+import { BRIDGE_SNAPSHOT_EVENT, IframeBridge, type BridgeMessage } from '@packages/bridge-sdk';
 import { createWsClient } from '@packages/ws-client';
 
 // Signal Viewer：专注于消费 Signal Hub + SSE 的观测面板。
@@ -41,7 +58,28 @@ if (import.meta.hot) {
 }
 const bridgeMessages = ref<string[]>([]);
 let disposeBridge: (() => void) | undefined;
+const { state: latestBridgeSnapshot } = useLocalStorageObserver<BridgeMessage<unknown> | null>(
+  BRIDGE_STORAGE_KEY,
+  null,
+  {
+    deserializer: (raw) => (raw ? (JSON.parse(raw) as BridgeMessage<unknown>) : null),
+    customEvent: BRIDGE_SNAPSHOT_EVENT,
+  }
+);
+const storageSnapshotText = computed(() => {
+  const snapshot = latestBridgeSnapshot.value;
+  if (!snapshot) return '暂无快照';
+  try {
+    return JSON.stringify(snapshot, null, 2);
+  } catch {
+    return String(snapshot);
+  }
+});
 
+const { history: channelHistory } = useBroadcastChannel<Record<string, unknown>>('signal-sync-alerts', 'signal-viewer');
+
+const sseMirror = ref<string[]>([]);
+let eventSource: EventSource | null = null;
 const wsEvents = ref<string[]>([]);
 const wsClient = createWsClient('ws://localhost:7001/ws/signal-hub?client=signal-viewer', {
   logger(message, payload) {
@@ -78,10 +116,19 @@ onMounted(async () => {
     bridgeMessages.value = [`${msg.type}: ${JSON.stringify(msg.payload)}`, ...bridgeMessages.value].slice(0, 10);
   });
   wsClient.connect();
+
+  // Viewer 也会直接消费后端 SSE，方便对比桥接质量。
+  eventSource = new EventSource('http://localhost:7001/api/sse/stream?consumer=signal-viewer', {
+    withCredentials: true,
+  });
+  eventSource.onmessage = (event) => {
+    sseMirror.value = [`SSE ${event.data}`, ...sseMirror.value].slice(0, 6);
+  };
 });
 
 onBeforeUnmount(() => {
   disposeBridge?.();
+  eventSource?.close();
   wsClient.close();
 });
 </script>

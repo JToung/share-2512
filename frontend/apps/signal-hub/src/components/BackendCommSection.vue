@@ -2,8 +2,35 @@
   <section class="backend-comm">
     <div class="section-heading">
       <h2>前后端通讯对比</h2>
+      <p class="section-subtitle">轮询、SSE、WebSocket 的不同侧重：容错性、带宽利用率，以及指令下发速度。</p>
     </div>
     <div class="grid transport-grid">
+      <article class="transport-card">
+        <div class="card-head">
+          <h3>HTTP 轮询</h3>
+          <span class="chip">Fallback</span>
+        </div>
+        <p class="card-subtitle">简单可控，专注于兜底，适合被动观测。</p>
+        <button @click="emit('toggle-polling')">
+          {{ pollingEnabled ? '关闭轮询' : '开启轮询' }}
+        </button>
+        <div class="snapshot-panel">
+          <span class="panel-label">最近轮询结果</span>
+          <pre>{{ pollSnapshot }}</pre>
+        </div>
+      </article>
+      <article class="transport-card">
+        <div class="card-head">
+          <h3>SSE（推荐用于跨平台接收）</h3>
+          <span class="chip hot">Realtime</span>
+        </div>
+        <p class="card-subtitle">后端：/api/sse/stream，连接断开时切换到轮询策略。</p>
+        <div class="snapshot-panel">
+          <span class="panel-label">近十条事件</span>
+          <pre>{{ sseEvents }}</pre>
+        </div>
+        <button class="ghost" @click="emit('reconnect-sse')">重新建立 SSE</button>
+      </article>
       <article class="transport-card">
         <div class="card-head">
           <h3>WebSocket（跨平台发送）</h3>
@@ -58,6 +85,9 @@ const wsMessageModel = computed({
   set: (value: string) => emit('update:newWsMessage', value),
 });
 
+const pollSnapshot = computed(() => unref(props.pollSnapshot));
+const pollingEnabled = computed(() => unref(props.pollingEnabled));
+const sseEvents = computed(() => unref(props.sseEvents));
 const wsStatus = computed(() => unref(props.wsStatus));
 const wsSendLog = computed(() => unref(props.wsSendLog) ?? []);
 const wsReceiveLog = computed(() => unref(props.wsReceiveLog) ?? []);

@@ -32,21 +32,25 @@
       :ws-send-log="wsSendLog"
       :ws-receive-log="wsReceiveLog"
       v-model:new-ws-message="newWsMessage"
+      @toggle-polling="togglePolling"
+      @reconnect-sse="reconnectSse"
       @send-ws="sendWs"
     />
 
+    <MixedFlowSection :mixed-flow-log="mixedFlowLog" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { useBroadcastChannel, useLocalStorageObserver, useLocalStorageSync } from '@packages/local-comm';
+import { httpPoll, useBroadcastChannel, useLocalStorageObserver, useLocalStorageSync } from '@packages/local-comm';
 import { createWsClient } from '@packages/ws-client';
 import { BRIDGE_SNAPSHOT_EVENT, IframeBridge, type BridgeMessage } from '@packages/bridge-sdk';
 import { useMessageStore } from './stores/messageStore';
 import BackendCommSection from './components/BackendCommSection.vue';
 import IframeBridgeSection from './components/IframeBridgeSection.vue';
 import LocalCommSection from './components/LocalCommSection.vue';
+import MixedFlowSection from './components/MixedFlowSection.vue';
 
 // Signal Hub 页面：串联本地缓存、跨域桥、SSE、WebSocket、HTTP Poll 的示例状态。
 const messageStore = useMessageStore();
@@ -118,9 +122,11 @@ const newWsMessage = ref('');
 
 const sseEvents = ref<string[]>([]);
 let eventSource: EventSource | null = null;
+let lastSseTs = Date.now();
 
 const pollSnapshot = ref<string[]>([]);
 const pollingEnabled = ref(false);
+let pollTimer: number | null = null;
 
 const BRIDGE_STORAGE_KEY = 'signal-bridge.snapshot';
 
@@ -186,6 +192,10 @@ function sendWs() {
   }
 }
 
+function reconnectSse() {
+  teardownSse();
+  startSse();
+}
 
 // 手动触发 iframe 桥发送消息，模拟用户操作。
 function replayIframe(message: string) {
@@ -211,15 +221,71 @@ function recordMixedFlow(step: string) {
   mixedFlowLog.value = [`${new Date().toISOString()} ${step}`, ...mixedFlowLog.value].slice(0, 6);
 }
 
+const startSse = () => {
+  // Signal Hub 作为“官方来源”，通过 SSE 接收后端消息。
+  recordMixedFlow('SSE connecting...');
+  eventSource = new EventSource('http://localhost:7001/api/sse/stream', {
+    withCredentials: true,
+  });
+  eventSource.onmessage = (event) => {
+    lastSseTs = Date.now();
+    const payload = `SSE >> ${event.data}`;
+    sseEvents.value = [payload, ...sseEvents.value].slice(0, 10);
+    messageStore.pushMessage({
+      id: crypto.randomUUID(),
+      channel: 'sse',
+      body: payload,
+      createdAt: Date.now(),
+    });
+    iframeBridge.send('sse-fanout', { body: event.data });
+    recordMixedFlow('SSE delivered + iframe fan-out');
+  };
+  eventSource.onerror = () => {
+    // 记录抖动时间差并提示 fallback。
+    const gap = Date.now() - lastSseTs;
+    messageStore.trackNetworkGap(gap);
+    recordMixedFlow('SSE offline, fallback to HTTP polling');
+  };
+};
+
 const teardownSse = () => {
   eventSource?.close();
   eventSource = null;
 };
 
+const startPolling = () => {
+  // HTTP Poll 在 SSE 断线时兜底，周期性抓取最近消息。
+  if (pollTimer) return;
+  pollTimer = window.setInterval(async () => {
+    try {
+      const messages = await httpPoll<string[]>('http://localhost:7001/api/sse/messages?limit=3');
+      pollSnapshot.value = messages;
+    } catch (error) {
+      console.warn('Polling failed', error);
+    }
+  }, 5_000);
+};
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+};
+
+const togglePolling = () => {
+  if (pollingEnabled.value) {
+    pollingEnabled.value = false;
+    stopPolling();
+    return;
+  }
+  pollingEnabled.value = true;
+  startPolling();
+};
 
 onMounted(async () => {
   wsClient.connect();
-  // startSse();
+  startSse();
   await iframeBridge.init();
   /**
    * bridge.onMessage 监听 IframeBridge 统一出口的消息
@@ -240,6 +306,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  stopPolling();
   teardownSse();
   disposeBridge?.();
   wsClient.close();
