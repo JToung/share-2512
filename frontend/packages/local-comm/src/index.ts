@@ -51,7 +51,7 @@ export function useBroadcastChannel<T>(
   };
 
   const handler = (event: MessageEvent<BroadcastEnvelope<T>>) => {
-    console.log('收到：', event.data)
+    console.log('收到BroadcastChannel消息：', event.data)
     pushHistory(event.data);
     onMessage?.(event.data.payload, { envelope: event.data, rawEvent: event });
   };
